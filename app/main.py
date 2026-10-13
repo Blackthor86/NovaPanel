@@ -117,11 +117,6 @@ class ConnectionCreate(BaseModel):
         return value
 
 
-class Capability(BaseModel):
-    status: Literal["available", "unavailable", "unknown"]
-    detail: str
-
-
 app = FastAPI(title="NovaPanel API", description="NovaPanel control API", version=APP_VERSION)
 origins = [x.strip() for x in os.getenv("NOVAPANEL_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])

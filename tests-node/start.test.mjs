@@ -19,7 +19,8 @@ test("single start command serves health endpoint from built artifact", async ()
       NOVAPANEL_DATA_DIR: dataDir,
       NOVAPANEL_SECRET_KEY: "test-only-secret-that-is-long-enough-for-start-test",
       NOVAPANEL_DEPLOYMENT_MODE: "paas_ws",
-      NOVAPANEL_XRAY_BINARY: ""
+      NOVAPANEL_XRAY_BINARY: "",
+      NOVAPANEL_AUTO_INSTALL_XRAY: "0"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });

@@ -166,7 +166,7 @@ export default function App() {
   async function runAction(pathname: string, method = "POST", body?: unknown) {
     setBusy(true);
     try {
-      const result = await request<{ status?: string; ok?: boolean; message?: string }>(pathname, {
+      const result = await request<{ status?: string; ok?: boolean; message?: string; engine_applied?: boolean }>(pathname, {
         method,
         body: body === undefined ? undefined : JSON.stringify(body)
       });

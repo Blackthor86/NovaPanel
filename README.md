@@ -1,76 +1,86 @@
 # NovaPanel
 
-NovaPanel is an open-source control panel project for managing proxy-engine deployments with a clean interface and a focus on security, observability, and host compatibility.
+NovaPanel is a self-hosted management panel for proxy-engine deployments, built around a Python API and a responsive web interface.
 
-**Status:** early development. The current version is a UI and API foundation only. It does not configure or run Xray yet.
+**Project status:** active development. The current build includes the dashboard, one-time admin setup, session login, local SQLite storage, user and connection profile management, host capability reporting, and optional Xray process controls when an operator installs and verifies the engine. It has not yet had an independent security review and should not be exposed directly to the public internet.
 
-## Goals
+## What is included
 
-- A focused dashboard that works well on desktop and mobile
-- Python backend with a documented API
-- Host capability reporting instead of assuming every hosting environment works the same way
-- Safe configuration validation before any engine integration
-- Tests and clear setup instructions
-- A codebase that is easy for contributors to understand
+- Persian RTL dashboard with a jade and navy theme, responsive layout, and motion effects
+- First-run admin account creation and session-based login
+- User UUID generation and management
+- Connection profile management for WS, gRPC, HTTPUpgrade, and XHTTP settings
+- Connection-link export when certificate and private-key paths are present
+- Host capability report that leaves network reachability as unknown until verified externally
+- Xray configuration test and process control, using an installed binary supplied by the operator
+- Backend tests and GitHub Actions checks
+
+User traffic quotas and expiry dates can be stored as metadata, but automatic traffic accounting and enforcement are not implemented yet. Certificate files being present does not prove the certificate is valid or trusted.
 
 ## Tech stack
 
-- Backend: Python, FastAPI
-- Frontend: React, TypeScript, Vite
-- Tests: pytest
-- License: GNU AGPL v3.0 or any later version
+- Python 3.11+, FastAPI, SQLite
+- React, TypeScript, Vite, Lucide
+- pytest
+- GNU AGPL-3.0-or-later
 
-## Run locally
+## Windows quick start
+
+Install Python 3.11+ and Node.js 20+.
+
+1. Double-click `run-backend-windows.bat`. Keep its window open.
+2. Double-click `run-frontend-windows.bat`. Keep its window open.
+3. Open the local URL printed by Vite, usually `http://127.0.0.1:5173`.
+4. On first launch, create an admin account with a username and a strong password of at least 14 characters.
+
+PowerShell users can also follow [the detailed Persian setup guide](docs/SETUP_FA.md). The launcher uses `npm.cmd` so it does not require changing PowerShell's script execution policy.
+
+## Manual setup
 
 ### Backend
 
-Python 3.11 or newer is recommended.
-
-```bash
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS / Linux:
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-The API will be available at `http://127.0.0.1:8000`, with interactive docs at `http://127.0.0.1:8000/docs`.
+The API is available at `http://127.0.0.1:8000`; interactive API docs are at `http://127.0.0.1:8000/docs`.
 
 ### Frontend
 
-Use Node.js 20 or newer.
-
-```bash
+```powershell
 cd frontend
-npm install
-npm run dev
+npm.cmd install
+npm.cmd run dev
 ```
 
-Vite prints the local URL when the development server starts. The frontend expects the API at `http://127.0.0.1:8000` while developing locally.
+## Xray integration
 
-## Project layout
+NovaPanel does not download or update Xray automatically. Install a release from a trusted official source, verify it, then set `NOVAPANEL_XRAY_BINARY` to its full path if it is not on PATH. Configure a connection with a valid TLS certificate and matching private key before testing the generated Xray configuration.
 
-- `app/` — FastAPI application and host capability checks
-- `frontend/` — React UI
+A saved connection is not a working connection by itself. DNS, firewall rules, the host provider's network policy, TLS validity, the client configuration, and the actual network path still need to be checked.
+
+## Configuration and security
+
+See [SECURITY.md](SECURITY.md) before any deployment. For remote use, set a stable, high-entropy `NOVAPANEL_SECRET_KEY`, enable `NOVAPANEL_COOKIE_SECURE=1` behind HTTPS, protect the admin interface with network access controls, and use persistent storage. Never commit secrets, private keys, or client links.
+
+The development server must not be exposed to the public internet. Host policies differ; only deploy proxy features on infrastructure that explicitly permits them.
+
+## Project structure
+
+- `app/` — FastAPI API and local engine management
+- `frontend/` — web dashboard
 - `tests/` — backend tests
-- `docs/` — project notes
+- `docs/` — roadmap and Persian setup guide
+- `SECURITY.md` — deployment safety notes
 
-## Security
+## Contribution
 
-This project is under active development and is not production-ready. Do not expose the development server to the public internet or put real credentials, subscription URLs, private keys, or tokens in issues or logs.
-
-Please report security issues privately to the repository owner rather than posting exploit details in public issues.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Retain attribution and license notices. Forks should clearly distinguish their modified projects and must not present themselves as the official NovaPanel release.
 
 ## Copyright and license
 
 Copyright (C) 2026 Blackthor86.
 
-This project is licensed under the GNU Affero General Public License, version 3 or (at your option) any later version. See [LICENSE](LICENSE).
-
-The NovaPanel name and branding are not granted as a trademark by this software license. Forks should clearly identify themselves as modified projects and must not imply that they are the official NovaPanel release.
+Licensed under GNU Affero General Public License v3.0 or any later version. See [LICENSE](LICENSE). The software license does not grant trademark rights to the NovaPanel name or branding.

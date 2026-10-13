@@ -625,7 +625,7 @@ def traffic_monitor(stop_event: threading.Event) -> None:
                     start_engine({})
                 except Exception:
                     with (DATA_DIR / "xray.log").open("a", encoding="utf-8") as log:
-                        log.write("\\n[NovaPanel] Engine restart failed after a quota or expiry limit was reached.\\n")
+                        log.write("\n[NovaPanel] Engine restart failed after a quota or expiry limit was reached.\n")
                 return
         except Exception:
             continue

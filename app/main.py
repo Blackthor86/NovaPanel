@@ -566,6 +566,22 @@ def delete_user(user_id: str, _: dict = Depends(get_admin)) -> dict:
     return {"ok": True, **reconcile_engine()}
 
 
+@app.post("/api/users/{user_id}/reset-traffic")
+def reset_user_traffic(user_id: str, _: dict = Depends(get_admin)) -> dict:
+    with db() as conn:
+        exists = conn.execute("SELECT 1 FROM vpn_users WHERE id = ?", (user_id,)).fetchone()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if engine_status()["status"] == "running" and not sync_traffic_counters():
+        raise HTTPException(status_code=503, detail="Could not synchronize Xray counters. Traffic was not reset; try again.")
+    with db() as conn:
+        conn.execute(
+            "UPDATE traffic_usage SET up_bytes = 0, down_bytes = 0, last_synced_at = ? WHERE user_id = ?",
+            (now_iso(), user_id),
+        )
+    return {"ok": True, "message": "Traffic counters were reset."}
+
+
 @app.get("/api/connections")
 def list_connections(_: dict = Depends(get_admin)) -> list[dict]:
     with db() as conn:

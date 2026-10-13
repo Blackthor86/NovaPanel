@@ -32,14 +32,20 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
   const links = makeSubscriptionLinks(state, "panel.example.test", 443, "edge", "a".repeat(64), {});
   assert.equal(links.length, 3);
   assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan"]);
-  assert.ok(links.every((link) => link.uri.includes("@panel.example.test:443")));
-  assert.ok(links.every((link) => link.uri.includes("security=tls")));
+  const uriLinks = links.filter((link) => link.protocol !== "vmess");
+  assert.ok(uriLinks.every((link) => link.uri.includes("@panel.example.test:443")));
+  assert.ok(links.every((link) => link.uri.includes("security=tls") || link.protocol === "vmess"));
   assert.equal(new URL(links[0].uri).searchParams.get("path"), state.paths.vless);
-  assert.ok(links[1].uri.startsWith("vmess://"));
-  const vmess = JSON.parse(Buffer.from(links[1].uri.slice("vmess://".length), "base64").toString("utf8"));
+  const vmessLink = links.find((link) => link.protocol === "vmess");
+  assert.ok(vmessLink.uri.startsWith("vmess://"));
+  const vmess = JSON.parse(Buffer.from(vmessLink.uri.slice("vmess://".length), "base64").toString("utf8"));
   assert.equal(vmess.path, state.paths.vmess);
   assert.equal(vmess.id, state.uuid);
-  assert.ok(links[2].uri.startsWith("trojan://"));
+  assert.equal(vmess.add, "panel.example.test");
+  assert.equal(vmess.port, "443");
+  const trojanLink = links.find((link) => link.protocol === "trojan");
+  assert.ok(trojanLink.uri.startsWith("trojan://"));
+  assert.ok(trojanLink.uri.includes("@panel.example.test:443"));
 });
 
 test("Xray configuration has all three WebSocket inbounds on unique loopback ports", () => {

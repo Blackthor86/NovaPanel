@@ -656,6 +656,10 @@ def create_subscription(user_id: str, request: Request, _: dict = Depends(get_ad
     if cur.rowcount == 0:
         raise HTTPException(status_code=409, detail="The user is disabled.")
     base_url = os.getenv("NOVAPANEL_PUBLIC_BASE_URL", "").rstrip("/")
+    if is_platform_ws_mode():
+        host = public_host(request)
+        if host:
+            base_url = "https://" + host
     if not base_url:
         base_url = str(request.base_url).rstrip("/")
     return {
@@ -1035,7 +1039,7 @@ async def platform_websocket_proxy(websocket: WebSocket, requested_path: str) ->
     await websocket.accept()
     try:
         upstream_url = f"ws://127.0.0.1:{internal_port}{profile['path']}"
-        async with websockets.connect(upstream_url, max_size=None, ping_interval=20, ping_timeout=20) as upstream:
+        async with websockets.connect(upstream_url, max_size=None, ping_interval=20, ping_timeout=20, compression=None) as upstream:
             async def client_to_xray() -> None:
                 while True:
                     event = await websocket.receive()

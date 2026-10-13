@@ -182,3 +182,46 @@ def test_quota_is_enforced_from_recorded_traffic(client):
 
     assert user_id in main.disable_expired_users()
     assert client.get("/api/users").json()[0]["enabled"] is False
+
+
+def test_subscription_links_are_revocable_and_return_active_profiles(client, tmp_path):
+    import base64
+    from urllib.parse import urlparse
+
+    create_admin(client)
+    user = client.post("/api/users", json={"name": "Subscription User"})
+    assert user.status_code == 201
+
+    certificate = tmp_path / "fullchain.pem"
+    private_key = tmp_path / "privkey.pem"
+    certificate.write_text("test certificate", encoding="utf-8")
+    private_key.write_text("test private key", encoding="utf-8")
+
+    connection = client.post(
+        "/api/connections",
+        json={
+            "name": "Subscription WS",
+            "address": "vpn.example.com",
+            "port": 443,
+            "transport": "ws",
+            "path": "/ray",
+            "certificate_file": str(certificate),
+            "private_key_file": str(private_key),
+        },
+    )
+    assert connection.status_code == 201
+
+    created = client.post("/api/users/" + user.json()["id"] + "/subscription")
+    assert created.status_code == 200
+    old_path = urlparse(created.json()["url"]).path
+    response = client.get(old_path)
+    assert response.status_code == 200
+    assert "no-store" in response.headers["cache-control"]
+    decoded = base64.b64decode(response.text).decode("utf-8")
+    assert "vless://" in decoded
+    assert "vpn.example.com:443" in decoded
+
+    rotated = client.post("/api/users/" + user.json()["id"] + "/subscription")
+    assert rotated.status_code == 200
+    assert client.get(old_path).status_code == 404
+    assert client.get(urlparse(rotated.json()["url"]).path).status_code == 200

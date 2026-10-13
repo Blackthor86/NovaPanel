@@ -134,6 +134,7 @@ export default function App() {
       });
       await refresh();
       setSignedIn(true);
+      setSetupRequired(false);
       setPassword("");
       toast(setupRequired ? "حساب مدیر ساخته شد." : "ورود موفق بود.");
     } catch (error) {

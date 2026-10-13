@@ -8,6 +8,7 @@ process.env.NOVAPANEL_DATA_DIR = mkdtempSync(join(tmpdir(), "novapanel-node-test
 process.env.NOVAPANEL_DEPLOYMENT_MODE = "direct";
 process.env.NOVAPANEL_SECRET_KEY = "test-only-secret-that-is-long-enough-for-tests";
 process.env.NOVAPANEL_XRAY_BINARY = "";
+process.env.NOVAPANEL_AUTO_INSTALL_XRAY = "0";
 
 let request;
 let client;

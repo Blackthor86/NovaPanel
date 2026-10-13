@@ -1,6 +1,6 @@
 # NovaPanel
 
-NovaPanel 0.4.0 is a self-hosted management panel for proxy-engine deployments, built around a Python API and a responsive web interface.
+NovaPanel 0.5.0 is a self-hosted management panel for proxy-engine deployments, built around a Python API and a responsive web interface.
 
 **Project status:** active development. The current build includes the dashboard, one-time admin setup, session login, local SQLite storage, user and connection profile management, host capability reporting, and optional Xray process controls when an operator installs and verifies the engine. It has not yet had an independent security review and should not be exposed directly to the public internet.
 
@@ -8,6 +8,9 @@ NovaPanel 0.4.0 is a self-hosted management panel for proxy-engine deployments, 
 
 - Persian RTL dashboard with a jade and navy theme, responsive layout, and motion effects
 - First-run admin password setup (no username) and password-only session login
+- Automatic app-host mode with a generated WebSocket endpoint and HTTPS subscription URLs
+- Direct inbound mode for a VPS/dedicated server with public TCP ports
+- SHA-256-pinned official Xray bootstrap for compatible Linux app hosts
 - User UUID generation and management, including traffic totals, quota and expiry enforcement
 - Connection profile management for WS, gRPC, HTTPUpgrade, and XHTTP settings
 - Individual VLESS link export when certificate and private-key paths are present
@@ -59,9 +62,15 @@ npm.cmd run dev
 
 ## Run the built dashboard and API on a Linux host
 
-If the provider has both Python and Node.js available, run `sh run-host.sh`. It installs the app dependencies, builds the React UI, then serves the dashboard and API from the same origin using the provider's `PORT` value (or port 8000 locally). Configure a stable `NOVAPANEL_SECRET_KEY`, `NOVAPANEL_COOKIE_SECURE=1` behind HTTPS, and `NOVAPANEL_PUBLIC_BASE_URL=https://your-public-panel.example` in the provider's environment settings. Keep a persistent volume mounted at `NOVAPANEL_DATA_DIR`.
+### Automatic app-host mode
 
-This combines the web dashboard and API only. It does **not** make a provider's HTTP-only app port suitable for a separate raw Xray inbound. Xray still requires an installed/verified binary and a network path the provider explicitly permits. A hosting platform that only exposes a web-proxied port needs a separately designed, provider-permitted adapter; this build does not bypass host networking restrictions.
+Upload the ZIP/repository and start it with `sh run-host.sh` on a Linux app host. Set `NOVAPANEL_DEPLOYMENT_MODE=paas_ws`, or leave `auto` on a host that provides `PORT`/`SERVER_PORT`. NovaPanel builds the dashboard, downloads a pinned official Xray release with SHA-256 verification if needed, infers the public hostname, creates a managed WebSocket endpoint, and generates subscription URLs. The hosting edge must forward WebSocket upgrades, allow the Xray child process, and permit outbound downloads during first boot. Mount persistent storage at `NOVAPANEL_DATA_DIR` and set a stable `NOVAPANEL_SECRET_KEY`.
+
+### Direct server mode
+
+Set `NOVAPANEL_DEPLOYMENT_MODE=direct` on a VPS/dedicated machine where public inbound sockets are allowed. Add a connection once in the admin panel with the real host, port, TLS certificate, and private key. Afterwards NovaPanel produces each user's VLESS/subscription links automatically—no per-client server setup is needed.
+
+These modes are intentionally different. Public HTTPS at the panel domain is not proof that a provider forwards WebSocket upgrades or permits proxy workloads. The platform mode is marked as configured, not as externally verified; test a generated subscription with a real client before handing it out. If the provider blocks WebSocket upgrades, child processes, or proxy workloads, use a compatible host or direct mode.
 
 ## Xray integration
 

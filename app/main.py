@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 DATA_DIR = Path(os.getenv("NOVAPANEL_DATA_DIR", str(ROOT_DIR / "data"))).expanduser()
@@ -57,12 +57,10 @@ class HostReport(BaseModel):
 
 
 class SetupInput(BaseModel):
-    username: str = Field(min_length=3, max_length=48, pattern=r"^[a-zA-Z0-9_.-]+$")
     password: str = Field(min_length=14, max_length=256)
 
 
 class LoginInput(BaseModel):
-    username: str = Field(min_length=1, max_length=48)
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -255,11 +253,12 @@ def get_admin(request: Request) -> dict:
     if not isinstance(admin_id, int):
         raise HTTPException(status_code=401, detail="Please sign in.")
     with db() as conn:
-        row = conn.execute("SELECT id, username FROM admins WHERE id = ?", (admin_id,)).fetchone()
+        row = conn.execute("SELECT id FROM admins WHERE id = ?", (admin_id,)).fetchone()
     if row is None:
         request.session.clear()
         raise HTTPException(status_code=401, detail="Please sign in.")
-    return dict(row)
+    # A display label replaces the now-hidden legacy username column.
+    return {"id": int(row["id"]), "username": "مدیر اصلی"}
 
 
 def admin_count() -> int:
@@ -395,11 +394,12 @@ def setup(data: SetupInput, request: Request) -> dict:
         if conn.execute("SELECT COUNT(*) FROM admins").fetchone()[0]:
             raise HTTPException(status_code=409, detail="Initial setup is already complete.")
         salt, digest = password_hash(data.password)
-        cur = conn.execute("INSERT INTO admins(username, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?)", (data.username, salt, digest, now_iso()))
+        # Keep a fixed internal value for compatibility with existing SQLite databases.
+        cur = conn.execute("INSERT INTO admins(username, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?)", ("admin", salt, digest, now_iso()))
         admin_id = cur.lastrowid
     request.session.clear()
     request.session["admin_id"] = int(admin_id)
-    return {"username": data.username}
+    return {"ok": True}
 
 
 @app.post("/api/login")
@@ -410,15 +410,15 @@ def login(data: LoginInput, request: Request) -> dict:
     if len(recent) >= 10:
         raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
     with db() as conn:
-        row = conn.execute("SELECT * FROM admins WHERE username = ? COLLATE NOCASE", (data.username,)).fetchone()
+        row = conn.execute("SELECT * FROM admins ORDER BY id ASC LIMIT 1").fetchone()
     if row is None or not check_password(data.password, row["password_salt"], row["password_hash"]):
         recent.append(now)
         _LOGIN_ATTEMPTS[ip] = recent
-        raise HTTPException(status_code=401, detail="Username or password is incorrect.")
+        raise HTTPException(status_code=401, detail="رمز عبور مدیر نادرست است.")
     _LOGIN_ATTEMPTS.pop(ip, None)
     request.session.clear()
     request.session["admin_id"] = int(row["id"])
-    return {"username": row["username"]}
+    return {"ok": True}
 
 
 @app.post("/api/logout")

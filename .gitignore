@@ -13,3 +13,7 @@ bin/
 *.sqlite3
 *.db
 *.log
+
+bk-data/
+novapanel-data/
+*.pem

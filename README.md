@@ -1,91 +1,64 @@
 # NovaPanel
 
-NovaPanel 0.6.0 is a self-hosted connection-management panel with a **single Node.js runtime**. The web dashboard is React + TypeScript, and the API, local database, subscription delivery, WebSocket relay, and Xray process control run under Node.js. Python is not required.
+NovaPanel is a compact, single-process Node.js panel with a Blue Knight Gate–style first-run flow: choose an admin password, copy one subscription URL, and add it to a V2Ray-compatible client.
 
-**Project status:** active development. The app-host WebSocket mode is created automatically when supported hosting variables are detected. Actual external connectivity still depends on the host's networking, WebSocket routing, process permissions, storage persistence, and service policy. The project has not had an independent security review; harden it before exposing it publicly.
+## What this version does
 
-## What's included
+- One Node.js runtime and one assigned public TCP port (SERVER_PORT preferred, then PORT).
+- First visit at /knight/login asks you to create an admin password; no username is needed.
+- Stable state under bk-data/ (or NOVAPANEL_DATA_DIR), including UUID, subscription token, WebSocket paths, password hash and TLS certificate.
+- One subscription URL serves a Base64 list of VLESS, VMess and Trojan WebSocket profiles. The same URL reflects future profile updates.
+- One TCP listener routes plain HTTP to the panel and TLS traffic to the internal HTTPS handler, using the same public port. WebSocket upgrades are relayed to local Xray inbounds.
+- Xray-core is installed automatically on supported Linux systems and starts in the background; the dashboard remains available while installation is running.
+- Direct mode supports TLS profiles with a self-signed certificate pin. A platform-edge mode is available for supported providers that terminate HTTPS before passing requests to the app.
 
-- Persian RTL dashboard with jade/navy styling
-- First-run admin setup and login using a password only (no username)
-- Node.js API and local SQLite database
-- Automatic app-host mode with generated WebSocket path and HTTPS subscription URLs
-- Direct-server mode for hosts with public inbound sockets
-- SHA-256-pinned official Xray download for compatible Linux hosts
-- User UUIDs, enable/disable, expiry and traffic-quota controls
-- WS, gRPC, HTTPUpgrade, and XHTTP connection profiles
-- Per-user VLESS links and revocable Base64 subscriptions
-- Xray configuration validation, process control, logs and per-user traffic polling
-- Node API smoke tests and GitHub Actions validation
+**Important:** this is a compact baseline, not a full feature-for-feature copy of every Blue Knight protocol. This version intentionally focuses on the shared-port web panel and V2Ray subscription path before adding gRPC, XHTTP, Clash, sing-box exports, traffic accounting or per-user administration.
 
-Traffic totals are polled from Xray approximately every 15 seconds while it is running. Quota/expiry enforcement may take one polling interval to apply. A generated profile or available TLS URL is not proof that a client can connect.
+## Deploy
 
-## Runtime
+Recommended runtime: **Node.js 22** (Node.js 20+ is supported).
 
-- Node.js 20+ (Node.js 22 recommended)
-- TypeScript, Express, SQLite, React, Vite
-- Xray-core is a separate native executable, not an application language dependency
-- GNU AGPL-3.0-or-later
+1. On main, download the ZIP from the successful GitHub Actions artifact NovaPanel-node-deploy. While this feature is still being reviewed in its pull request, use the preview artifact NovaPanel-blue-knight-lite-preview instead. You can also upload the source files and run npm install.
+2. Set the start command to npm start (node index.js).
+3. Ensure the host assigns SERVER_PORT or PORT and exposes that port as the public web/TCP port.
+4. Use persistent writable storage for NOVAPANEL_DATA_DIR so restarts do not change the UUID, subscription token, password or certificate.
+5. Open http://<public-host>:<assigned-port>/knight or the public URL provided by the host. At first visit, create a password of at least 8 characters.
+6. Copy the **subscription URL** (not an individual VLESS/VMess/Trojan link), add it as a subscription in your V2Ray client, and update the subscription.
+7. Before sharing it, verify that /api/health reports engine_status: "running" and test actual connectivity in a client.
 
-## Deploy on a Node.js app host
+If the host exposes only an HTTPS reverse-proxy domain and does not route raw TCP/TLS on the assigned app port, set NOVAPANEL_LINK_MODE=edge only when the host also supports WebSocket upgrades. In that mode, generated links use the provider's HTTPS edge on port 443. For a raw TCP port host such as a typical game-panel allocation, leave the mode as direct.
 
-1. Upload the ZIP generated from the repository, or import the repository if the hosting provider supports the build dependencies.
-2. Select Node.js 20 or 22.
-3. Set the start command to `npm start`.
-4. Set a stable random `NOVAPANEL_SECRET_KEY` and mount persistent storage for `NOVAPANEL_DATA_DIR`.
-5. If the provider exposes `PORT` or `SERVER_PORT`, automatic mode is selected by default. You can explicitly set `NOVAPANEL_DEPLOYMENT_MODE=paas_ws`.
-6. Open the public HTTPS domain and set an admin password of at least 14 characters.
+## Environment variables
 
-`npm start` builds the TypeScript API and React dashboard, then starts one Node.js application listening on `0.0.0.0:$PORT` (or `$SERVER_PORT`). There is no separate Python service to configure.
+| Variable | Purpose |
+|---|---|
+| SERVER_PORT / PORT | Public listener; SERVER_PORT takes precedence. |
+| NOVAPANEL_DATA_DIR | Persistent writable folder; defaults to ./bk-data. |
+| NOVAPANEL_PUBLIC_HOST or DOMAIN | Override the hostname embedded in connection links. Otherwise the request host is learned and saved. |
+| NOVAPANEL_PUBLIC_BASE_URL | Override the base URL used for the subscription endpoint. |
+| NOVAPANEL_LINK_MODE | direct (default) or edge. |
+| NOVAPANEL_LINK_PORT | Override the port embedded in proxy links. |
+| NOVAPANEL_AUTO_INSTALL_XRAY | 1 by default. Set to 0 to run the web panel without the proxy engine. |
+| NOVAPANEL_XRAY_BINARY | Use an existing executable Xray path instead of downloading one. |
+| PANEL_PASSWORD | Optional initial/admin password supplied as a hosting secret. |
+| SETUP_KEY | Optional extra key required only during first password setup. |
+| SUB_TOKEN | Optional stable subscription token; otherwise generated randomly. |
+| PANEL_PATH | Panel route; defaults to knight. |
 
-For the automatic profile, the hosting edge must forward WebSocket upgrades to the application. The app attempts to download the pinned official Xray release on compatible Linux systems if no executable is already present. If bootstrap fails, the dashboard still starts and reports that the engine is unavailable.
+Keep the bk-data/ directory. It stores the subscription token, UUID, routes, password hash and certificate. Deleting it creates new links and requires re-importing the subscription.
 
-## Local development
+## Test locally
 
-Install Node.js 20+ and run at the repository root:
+Run npm install, then npm test, then npm start.
 
-```sh
-npm install
-npm start
-```
+CI includes a live tunnel test that starts Xray and checks real HTTP traffic through a VLESS + TLS + WebSocket client connection over the same public TCP port. This test is more meaningful than merely checking that the panel API returns HTTP 200; actual connectivity on the target hosting provider still needs a final provider-side test.
 
-The app prints the listening port; the local URL is normally `http://127.0.0.1:8000`. On first launch, choose a strong admin password of at least 14 characters. No username is needed.
+## Limitations in this baseline
 
-To build without starting the service:
+Only VLESS, VMess and Trojan WebSocket profiles are generated. Direct TLS uses a self-signed certificate with a SHA-256 pin in the subscription URI; confirm your client honors it before production use. Usage quotas, client CRUD, Clash/sing-box output, Reality, gRPC and XHTTP are not implemented in this compact baseline.
 
-```sh
-npm run build
-```
+## Security and license
 
-Run API smoke tests:
+Treat the subscription URL as a secret because it contains the subscription token. Use a persistent volume, a private/long admin password, and a setup key when the public URL is reachable by others. See SECURITY.md.
 
-```sh
-npm test
-```
-
-## Direct-server mode
-
-On a VPS/dedicated host with public inbound sockets allowed, set `NOVAPANEL_DEPLOYMENT_MODE=direct`, install and verify Xray, and add a connection once with its real host, port, TLS certificate, and private key paths. NovaPanel then generates each user's links/subscription automatically; no per-client server setup is needed.
-
-## Configuration and security
-
-See [SECURITY.md](SECURITY.md) before deployment. For a remote install, set a stable, high-entropy `NOVAPANEL_SECRET_KEY`, enable `NOVAPANEL_COOKIE_SECURE=1` behind HTTPS, restrict access to the admin dashboard, and use persistent storage. Never commit secrets, private keys, client links, or subscription tokens.
-
-Network reachability is never inferred just from an open URL or runtime type. Test a generated subscription with a real client before sharing it. Do not expose a development server directly to the public internet.
-
-## Project structure
-
-- `server/` — Node.js API, SQLite, WebSocket relay, and Xray process management
-- `frontend/` — React dashboard and Vite build
-- `tests-node/` — Node API smoke tests
-- `SECURITY.md` — deployment security notes
-
-## Contribution
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Retain attribution and license notices. Forks should clearly distinguish modified projects and should not present them as the official NovaPanel release.
-
-## Copyright and license
-
-Copyright (C) 2026 Blackthor86.
-
-Licensed under GNU Affero General Public License v3.0 or any later version. See [LICENSE](LICENSE). The software license does not grant trademark rights to the NovaPanel name or branding.
+The project license is GNU AGPL-3.0-or-later. Keep all attribution and license notices.

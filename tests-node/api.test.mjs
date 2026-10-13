@@ -1,101 +1,192 @@
-import { test, before } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import net from "node:net";
+import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
+import { buildXrayConfig, makeSubscriptionLinks, VERSION } from "../index.js";
 
-process.env.NOVAPANEL_DATA_DIR = mkdtempSync(join(tmpdir(), "novapanel-node-test-"));
-process.env.NOVAPANEL_DEPLOYMENT_MODE = "direct";
-process.env.NOVAPANEL_SECRET_KEY = "test-only-secret-that-is-long-enough-for-tests";
-process.env.NOVAPANEL_XRAY_BINARY = "";
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = address && typeof address === "object" ? address.port : 0;
+      server.close((err) => err ? reject(err) : resolve(port));
+    });
+  });
+}
 
-let request;
-let client;
-let app;
-
-before(async () => {
-  ({ default: request } = await import("supertest"));
-  ({ app } = await import("../build/server/index.js"));
-  client = request.agent(app);
+test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths", () => {
+  const state = {
+    uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
+    paths: {
+      vless: "/connect/vless-unit-test",
+      vmess: "/connect/vmess-unit-test",
+      trojan: "/connect/trojan-unit-test"
+    }
+  };
+  const links = makeSubscriptionLinks(state, "panel.example.test", 443, "edge", "a".repeat(64), {});
+  assert.equal(links.length, 3);
+  assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan"]);
+  const uriLinks = links.filter((link) => link.protocol !== "vmess");
+  assert.ok(uriLinks.every((link) => link.uri.includes("@panel.example.test:443")));
+  assert.ok(links.every((link) => link.uri.includes("security=tls") || link.protocol === "vmess"));
+  assert.equal(new URL(links[0].uri).searchParams.get("path"), state.paths.vless);
+  const vmessLink = links.find((link) => link.protocol === "vmess");
+  assert.ok(vmessLink.uri.startsWith("vmess://"));
+  const vmess = JSON.parse(Buffer.from(vmessLink.uri.slice("vmess://".length), "base64").toString("utf8"));
+  assert.equal(vmess.path, state.paths.vmess);
+  assert.equal(vmess.id, state.uuid);
+  assert.equal(vmess.add, "panel.example.test");
+  assert.equal(vmess.port, "443");
+  const trojanLink = links.find((link) => link.protocol === "trojan");
+  assert.ok(trojanLink.uri.startsWith("trojan://"));
+  assert.ok(trojanLink.uri.includes("@panel.example.test:443"));
 });
 
-test("health and initial setup", async () => {
-  const health = await client.get("/api/health").expect(200);
-  assert.equal(health.body.app, "NovaPanel");
-  assert.equal(health.body.version, "0.6.0");
-  const setup = await client.get("/api/setup/status").expect(200);
-  assert.equal(setup.body.setup_required, true);
-  await client.post("/api/setup").send({ password: "a-long-and-secure-test-passphrase" }).expect(200);
-  await client.get("/api/me").expect(200);
-  await client.get("/api/setup/status").expect(200).then((response) => assert.equal(response.body.setup_required, false));
-  await client.post("/api/setup").send({ password: "another-long-and-secure-passphrase" }).expect(409);
+test("Xray configuration has all three WebSocket inbounds on unique loopback ports", () => {
+  const state = {
+    uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
+    paths: {
+      vless: "/connect/vless-unit-test",
+      vmess: "/connect/vmess-unit-test",
+      trojan: "/connect/trojan-unit-test"
+    }
+  };
+  const config = buildXrayConfig(state, { vless: 22001, vmess: 22002, trojan: 22003 }, "/tmp/novapanel-test");
+  assert.equal(config.inbounds.length, 3);
+  assert.deepEqual(config.inbounds.map((item) => item.protocol), ["vless", "vmess", "trojan"]);
+  assert.deepEqual(config.inbounds.map((item) => item.port), [22001, 22002, 22003]);
+  assert.ok(config.inbounds.every((item) => item.listen === "127.0.0.1"));
+  assert.ok(config.inbounds.every((item) => item.streamSettings.network === "ws"));
+  assert.deepEqual(config.inbounds.map((item) => item.streamSettings.wsSettings.path), Object.values(state.paths));
 });
 
-test("user lifecycle and subscription token behavior", async () => {
-  const unauthorized = request(app);
-  await unauthorized.get("/api/users").expect(401);
-  const created = await client.post("/api/users").send({ name: "Test User", quota_gb: 25 }).expect(201);
-  assert.equal(created.body.name, "Test User");
-  assert.equal(created.body.quota_gb, 25);
-  assert.ok(created.body.uuid);
-  const users = await client.get("/api/users").expect(200);
-  assert.equal(users.body.length, 1);
-  assert.equal(users.body[0].name, "Test User");
+test("standalone start binds SERVER_PORT, allows first-use password setup, and serves a usable base64 subscription", async () => {
+  const root = path.resolve(".");
+  const port = await freePort();
+  const wrongPort = port === 65535 ? port - 1000 : port + 1;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "novapanel-lite-test-"));
+  const child = spawn(process.execPath, ["index.js"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      SERVER_PORT: String(port),
+      PORT: String(wrongPort),
+      NOVAPANEL_DATA_DIR: dataDir,
+      NOVAPANEL_PUBLIC_HOST: "127.0.0.1",
+      NOVAPANEL_AUTO_INSTALL_XRAY: "0",
+      NOVAPANEL_LINK_MODE: "direct",
+      PANEL_PATH: "knight"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let logs = "";
+  child.stdout.on("data", (chunk) => { logs += chunk.toString(); });
+  child.stderr.on("data", (chunk) => { logs += chunk.toString(); });
 
-  const connection = await client.post("/api/connections").send({
-    name: "Test WS", address: "vpn.example.com", port: 443, transport: "ws", path: "/ray"
-  }).expect(201);
-  assert.equal(connection.body.tls_ready, false);
-
-  const sub = await client.post(`/api/users/${created.body.id}/subscription`).expect(200);
-  assert.match(sub.body.url, /\/api\/subscriptions\//);
-  await client.get(new URL(sub.body.url).pathname).expect(409);
-
-  await client.put(`/api/users/${created.body.id}`).send({ enabled: false, name: "Disabled User" }).expect(200);
-  await client.post(`/api/users/${created.body.id}/subscription`).expect(409);
-  await client.delete(`/api/users/${created.body.id}`).expect(200);
-  await client.get("/api/users").expect(200).then((response) => assert.equal(response.body.length, 0));
-});
-
-test("host capabilities are explicit and API errors are JSON", async () => {
-  const host = await client.get("/api/host").expect(200);
-  assert.ok(host.body.node_version);
-  assert.equal(host.body.capabilities.inbound_tcp_udp.status, "unknown");
-  const invalid = await client.post("/api/connections").send({
-    name: "Bad", address: "https://example.com/path", port: 443
-  }).expect(422);
-  assert.ok(invalid.body.detail);
-  await client.get("/openapi.json").expect(200);
-});
-
-test("app-host mode creates a managed WebSocket profile and usable subscription payload", async () => {
-  process.env.NOVAPANEL_DEPLOYMENT_MODE = "paas_ws";
+  const base = "http://127.0.0.1:" + port;
+  const deadline = Date.now() + 10000;
+  let health = null;
   try {
-    const deployment = await client.get("/api/deployment").expect(200);
-    assert.equal(deployment.body.mode, "paas_ws");
-    assert.equal(deployment.body.auto_connection, true);
-    const connections = await client.get("/api/connections").expect(200);
-    const managed = connections.body.find((connection) => connection.managed_by_platform);
-    assert.ok(managed);
-    assert.equal(managed.port, 443);
-    assert.match(managed.path, /^\/connect\//);
+    while (Date.now() < deadline && child.exitCode === null) {
+      try {
+        const response = await fetch(base + "/api/health", { signal: AbortSignal.timeout(500) });
+        if (response.ok) { health = await response.json(); break; }
+      } catch { /* process is still binding the public socket */ }
+      await delay(100);
+    }
+    assert.ok(health, "health endpoint never became ready; logs:\n" + logs);
+    assert.equal(health.app, "NovaPanel");
+    assert.equal(health.version, VERSION);
+    assert.equal(health.listen_port, port);
+    assert.equal(health.engine_status, "disabled");
 
-    const user = await client.post("/api/users").send({ name: "Auto WS User", quota_gb: 5 }).expect(201);
-    const subscription = await client.post(`/api/users/${user.body.id}/subscription`).expect(200);
-    const raw = await client.get(new URL(subscription.body.url).pathname).expect(200);
-    const link = Buffer.from(raw.text, "base64").toString("utf8");
-    assert.match(link, /^vless:\/\//);
-    assert.match(link, /@127\.0\.0\.1:443\?/);
-    assert.ok(link.includes(encodeURIComponent(managed.path)));
+    const setupPage = await fetch(base + "/knight/login");
+    assert.equal(setupPage.status, 200);
+    assert.match(await setupPage.text(), /ساخت رمز مدیر/);
 
-    const { buildXrayConfig } = await import("../build/server/index.js");
-    const config = buildXrayConfig();
-    assert.equal(config.inbounds.length, 1);
-    assert.equal(config.inbounds[0].listen, "127.0.0.1");
-    assert.equal(config.inbounds[0].port, 10086);
-    assert.equal(config.inbounds[0].streamSettings.security, "none");
-    assert.equal(config.inbounds[0].streamSettings.wsSettings.path, managed.path);
+    const setup = await fetch(base + "/knight/login", {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ password: "test-password-strong", confirm: "test-password-strong" })
+    });
+    assert.equal(setup.status, 302);
+    assert.equal(setup.headers.get("location"), "/knight");
+    const setCookie = setup.headers.get("set-cookie");
+    assert.ok(setCookie, "first-run password setup should create a session cookie");
+    const cookie = setCookie.split(";")[0];
+
+    const statusRes = await fetch(base + "/api/status", { headers: { cookie } });
+    assert.equal(statusRes.status, 200);
+    const status = await statusRes.json();
+    assert.equal(status.engine_status, "disabled");
+    assert.equal(status.links.length, 6);
+    assert.equal(status.public_host, "127.0.0.1");
+    assert.equal(status.link_port, port);
+    assert.match(status.subscription_url, /\/knight\/sub\?token=/);
+
+    const subRes = await fetch(status.subscription_url);
+    assert.equal(subRes.status, 200);
+    assert.match(subRes.headers.get("content-type") || "", /text\/plain/);
+    assert.equal(subRes.headers.get("profile-update-interval"), "24");
+    const links = Buffer.from(await subRes.text(), "base64").toString("utf8").trim().split(/\r?\n/);
+    assert.equal(links.length, 6);
+    assert.ok(links.some((line) => line.startsWith("vless://") && line.includes("security=none")));
+    assert.ok(links.some((line) => line.startsWith("vless://") && line.includes("security=tls")));
+    assert.ok(links.some((line) => line.startsWith("vmess://")));
+    assert.ok(links.some((line) => line.startsWith("trojan://")));
+    for (const line of links.filter((item) => item.startsWith("vless://") || item.startsWith("trojan://"))) {
+      assert.ok(line.includes("@127.0.0.1:" + port + "?"), line);
+    }
+
+    const rawRes = await fetch(base + "/knight/raw?token=" + encodeURIComponent(status.subscription_token));
+    assert.equal(rawRes.status, 200);
+    const raw = await rawRes.text();
+    assert.match(raw, /^vless:\/\//m);
+    assert.match(raw, /^trojan:\/\//m);
+
+    const tlsHealth = await fetchHttpsHealth(port);
+    assert.equal(tlsHealth.status, 200);
+    assert.equal(tlsHealth.body.app, "NovaPanel");
   } finally {
-    process.env.NOVAPANEL_DEPLOYMENT_MODE = "direct";
+    if (child.exitCode === null) child.kill("SIGTERM");
+    await new Promise((resolve) => {
+      if (child.exitCode !== null) return resolve();
+      const timer = setTimeout(resolve, 4000);
+      child.once("exit", () => { clearTimeout(timer); resolve(); });
+    });
+    if (child.exitCode === null) child.kill("SIGKILL");
+    fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+async function fetchHttpsHealth(port) {
+  const { request } = await import("node:https");
+  return await new Promise((resolve, reject) => {
+    const req = request({
+      hostname: "127.0.0.1",
+      port,
+      path: "/api/health",
+      method: "GET",
+      rejectUnauthorized: false,
+      timeout: 4000
+    }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(body) }); }
+        catch (error) { reject(error); }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("TLS health request timed out")));
+    req.end();
+  });
+}

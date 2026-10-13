@@ -354,7 +354,7 @@ def ensure_platform_connection(request: Request | None = None) -> dict | None:
                    (id, name, address, port, transport, path, service_name, host_header, server_name,
                     certificate_file, private_key_file, enabled, created_at)
                    VALUES (?, ?, ?, 443, 'ws', ?, 'novapanel', ?, ?, NULL, NULL, 1, ?)""",
-                (AUTO_CONNECTION_ID, "اتصال خودکار میزبان", "/connect/" + secrets.token_urlsafe(24), host, host, now_iso()),
+                (AUTO_CONNECTION_ID, "اتصال خودکار میزبان", host, "/connect/" + secrets.token_urlsafe(24), host, host, now_iso()),
             )
         else:
             conn.execute(

@@ -65,5 +65,5 @@ test("host capabilities are explicit and API errors are JSON", async () => {
     name: "Bad", address: "https://example.com/path", port: 443
   }).expect(422);
   assert.ok(invalid.body.detail);
-  await client.get("/api/openapi.json").expect(200);
+  await client.get("/openapi.json").expect(200);
 });

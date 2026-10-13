@@ -566,11 +566,16 @@ async function startRuntime() {
   };
   const certHost = cleanHost(process.env.NOVAPANEL_PUBLIC_HOST || process.env.DOMAIN || process.env.FORCE_HOST || process.env.RAILWAY_PUBLIC_DOMAIN) || "localhost";
   const certificate = ensureCertificate(dataDir, certHost);
-  const inbounds = {
-    vless: await getFreePort(),
-    vmess: await getFreePort(),
-    trojan: await getFreePort()
-  };
+  const inbounds = {};
+  const reservedPorts = new Set();
+  for (const protocol of ["vless", "vmess", "trojan"]) {
+    let port;
+    do {
+      port = await getFreePort();
+    } while (reservedPorts.has(port));
+    reservedPorts.add(port);
+    inbounds[protocol] = port;
+  }
   const xrayConfigPath = path.join(dataDir, "xray.json");
   const xrayLogPath = path.join(dataDir, "xray.log");
   const xrayConfig = buildXrayConfig(state, inbounds, dataDir);

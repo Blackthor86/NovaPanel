@@ -106,13 +106,12 @@ export default function App() {
         const status = await request<{ setup_required: boolean }>("/api/setup/status");
         if (!mounted) return;
         setSetupRequired(status.setup_required);
-        if (!status.setup_required) {
-          try {
-            await refresh();
-            if (mounted) setSignedIn(true);
-          } catch {
-            if (mounted) setSignedIn(false);
-          }
+        if (status.setup_required) return;
+        try {
+          await refresh();
+          if (mounted) setSignedIn(true);
+        } catch {
+          if (mounted) setSignedIn(false);
         }
       } catch {
         if (mounted) toast("ارتباط با API برقرار نشد. سرور Python را روشن کن.", true);

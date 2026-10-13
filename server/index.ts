@@ -348,7 +348,11 @@ function startTrafficMonitor() {
 function stopTrafficMonitor() { if (trafficTimer) clearInterval(trafficTimer); trafficTimer = null; }
 async function startEngine(): Promise<Row> {
   if (engineStatus().status === "running") return { status: "running" };
-  const binary = engineBinary();
+  let binary = engineBinary();
+  if (!binary && isPlatformWsMode()) {
+    await ensureXrayInstalled();
+    binary = engineBinary();
+  }
   if (!binary) throw new ApiError(503, "Xray binary not found. Install a verified Xray release or set NOVAPANEL_XRAY_BINARY.");
   let config: Row;
   try { config = buildXrayConfig(); } catch (error) { if (error instanceof ApiError) throw error; throw new ApiError(422, String(error)); }
@@ -402,9 +406,14 @@ async function maybeStartAutoEngine(): Promise<Row> {
   const clients = Number((db.prepare("SELECT COUNT(*) AS n FROM vpn_users WHERE enabled=1").get() as Row).n);
   const profile = Number((db.prepare("SELECT COUNT(*) AS n FROM connections WHERE id=? AND enabled=1").get(AUTO_CONNECTION_ID) as Row).n);
   if (!clients || !profile) return {};
-  if (!engineBinary()) return { engine_applied: false, message: "کاربر و لینک ساخته می‌شوند، اما موتور Xray در دسترس نیست؛ اجرای VPN تا نصب موتور ممکن نیست." };
-  try { await startEngine(); return { engine_applied: true, message: "موتور اتصال خودکار اجرا شد." }; }
-  catch (error) { return { engine_applied: false, message: "اتصال خودکار ساخته شد، اما Xray اجرا نشد: " + (error instanceof Error ? error.message : String(error)) }; }
+  try {
+    if (!engineBinary()) await ensureXrayInstalled();
+    if (!engineBinary()) return { engine_applied: false, message: "کاربر و لینک ساخته شدند؛ نصب یا اجرای خودکار Xray روی این میزبان ممکن نشد. لاگ راه‌اندازی را بررسی کن." };
+    await startEngine();
+    return { engine_applied: true, message: "موتور اتصال خودکار اجرا شد." };
+  } catch (error) {
+    return { engine_applied: false, message: "اتصال خودکار ساخته شد، اما Xray اجرا نشد: " + (error instanceof Error ? error.message : String(error)) };
+  }
 }
 
 app.disable("x-powered-by");
@@ -642,6 +651,16 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
   res.status(status).json({ detail });
 });
 
+let xrayBootstrapPromise: Promise<boolean> | null = null;
+function ensureXrayInstalled(): Promise<boolean> {
+  if (engineBinary()) return Promise.resolve(true);
+  if (!isPlatformWsMode() || process.platform !== "linux") return Promise.resolve(false);
+  if (!xrayBootstrapPromise) {
+    xrayBootstrapPromise = bootstrapXray().finally(() => { xrayBootstrapPromise = null; });
+  }
+  return xrayBootstrapPromise;
+}
+
 async function bootstrapXray(): Promise<boolean> {
   if (engineBinary()) return true;
   if (!isPlatformWsMode() || process.platform !== "linux") return false;
@@ -729,11 +748,19 @@ function initPlatformConnectionFromUpgrade() {
 }
 
 function listen() {
-  const port = Number.parseInt(process.env.PORT || process.env.SERVER_PORT || "8000", 10);
-  server.listen(Number.isFinite(port) && port > 0 ? port : 8000, "0.0.0.0", () => {
+  // Botkeep assigns the application's reachable HTTP port through SERVER_PORT.
+  // Prefer it over generic PORT when both happen to be present.
+  const configuredPort = process.env.SERVER_PORT || process.env.PORT || "8000";
+  const parsedPort = Number.parseInt(configuredPort, 10);
+  const port = Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 8000;
+  server.listen(port, "0.0.0.0", () => {
     console.log(`[NovaPanel] ${VERSION} listening on 0.0.0.0:${port}`);
+    if (isPlatformWsMode() && !process.env.SERVER_PORT && process.env.PORT) {
+      console.log("[NovaPanel] PORT detected; SERVER_PORT was not set. For Botkeep, confirm the assigned HTTP port.");
+    }
   });
-  if (isPlatformWsMode()) void bootstrapXray().then(async () => { initPlatformConnectionFromUpgrade(); await maybeStartAutoEngine(); }).catch((error) => console.error("[NovaPanel] Startup bootstrap failed:", error));
+  // Do not download/unpack Xray on a cold start. The control panel should be fast
+  // even before users need the connection engine; install it lazily when needed.
 }
 async function shutdown() {
   try { await stopEngine(); } catch { /* shutdown best effort */ }

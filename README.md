@@ -33,12 +33,12 @@ Traffic totals are polled from Xray approximately every 15 seconds while it is r
 2. Select Node.js 20 or 22.
 3. Set the start command to `npm start`.
 4. Set a stable random `NOVAPANEL_SECRET_KEY` and mount persistent storage for `NOVAPANEL_DATA_DIR`.
-5. If the provider exposes `PORT` or `SERVER_PORT`, automatic mode is selected by default. You can explicitly set `NOVAPANEL_DEPLOYMENT_MODE=paas_ws`.
+5. If the provider exposes `SERVER_PORT`, NovaPanel binds to that assigned HTTP port (it takes precedence over generic `PORT`). Automatic mode is selected by default for recognized app-host environments. You can explicitly set `NOVAPANEL_DEPLOYMENT_MODE=paas_ws`.
 6. Open the public HTTPS domain and set an admin password of at least 14 characters.
 
-`npm start` builds the TypeScript API and React dashboard, then starts one Node.js application listening on `0.0.0.0:$PORT` (or `$SERVER_PORT`). There is no separate Python service to configure.
+`npm start` starts one Node.js application listening on `0.0.0.0:$SERVER_PORT` (or `$PORT` if `SERVER_PORT` is absent). The ready-to-deploy CI ZIP includes the compiled API and frontend, so it starts without a production build. If you upload the source ZIP instead, the first start builds the TypeScript API and React dashboard and will use more CPU until that build completes. There is no separate Python service to configure.
 
-For the automatic profile, the hosting edge must forward WebSocket upgrades to the application. The app attempts to download the pinned official Xray release on compatible Linux systems if no executable is already present. If bootstrap fails, the dashboard still starts and reports that the engine is unavailable.
+For the automatic profile, the hosting edge must forward WebSocket upgrades to the application. The dashboard starts without downloading Xray. When the first active user needs the engine, NovaPanel attempts to download the pinned official Xray release on compatible Linux systems in the background. If bootstrap fails, the dashboard remains available and reports that the engine is unavailable. On Botkeep, configure the public HTTP domain in Domains and use the assigned `SERVER_PORT`; the Network tab by itself is not a substitute for enabling HTTP domain routing.
 
 ## Local development
 

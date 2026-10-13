@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -146,10 +145,7 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
     assert.match(raw, /^vless:\/\//m);
     assert.match(raw, /^trojan:\/\//m);
 
-    const tlsHealth = await new Promise((resolve, reject) => {
-      const request = requireHttpsRequest(port, resolve, reject);
-      request.end();
-    });
+    const tlsHealth = await fetchHttpsHealth(port);
     assert.equal(tlsHealth.status, 200);
     assert.equal(tlsHealth.body.app, "NovaPanel");
   } finally {
@@ -164,8 +160,9 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
   }
 });
 
-function requireHttpsRequest(port, resolve, reject) {
-  return import("node:https").then(({ request }) => {
+async function fetchHttpsHealth(port) {
+  const { request } = await import("node:https");
+  return await new Promise((resolve, reject) => {
     const req = request({
       hostname: "127.0.0.1",
       port,
@@ -184,6 +181,6 @@ function requireHttpsRequest(port, resolve, reject) {
     });
     req.on("error", reject);
     req.on("timeout", () => req.destroy(new Error("TLS health request timed out")));
-    return req;
-  }).catch(reject);
+    req.end();
+  });
 }

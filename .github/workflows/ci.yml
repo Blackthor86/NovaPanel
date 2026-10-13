@@ -37,7 +37,7 @@ jobs:
         run: |
           rm -rf deploy-package NovaPanel-node-deploy.zip
           mkdir deploy-package
-          cp -R server frontend package.json package-lock.json tsconfig.json README.md SECURITY.md LICENSE .env.example deploy-package/
+          cp -R server build scripts frontend package.json package-lock.json tsconfig.json README.md SECURITY.md LICENSE .env.example deploy-package/
           rm -rf deploy-package/frontend/node_modules deploy-package/frontend/.vite
           cd deploy-package
           zip -qr ../NovaPanel-node-deploy.zip .

@@ -7,6 +7,7 @@ import app.main as main
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.sqlite3")
+    monkeypatch.setenv("NOVAPANEL_DEPLOYMENT_MODE", "direct")
     main.init_db()
     with TestClient(main.app) as test_client:
         yield test_client
@@ -24,6 +25,7 @@ def test_health_and_setup_status(client):
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["app"] == "NovaPanel"
+    assert response.json()["version"] == "0.5.0"
 
     status = client.get("/api/setup/status")
     assert status.status_code == 200
@@ -109,6 +111,45 @@ def test_host_report_does_not_guess_network_support(client):
     response = client.get("/api/host")
     assert response.status_code == 200
     assert response.json()["capabilities"]["inbound_tcp_udp"]["status"] == "unknown"
+
+
+def test_platform_websocket_mode_creates_a_managed_profile(client, monkeypatch):
+    monkeypatch.setenv("NOVAPANEL_DEPLOYMENT_MODE", "paas_ws")
+    create_admin(client)
+    status = client.get("/api/deployment")
+    assert status.status_code == 200
+    assert status.json()["mode"] == "paas_ws"
+    assert status.json()["auto_connection"] is True
+    connection = client.get("/api/connections").json()[0]
+    assert connection["managed_by_platform"] is True
+    assert connection["tls_ready"] is True
+    assert connection["port"] == 443
+
+    user = client.post("/api/users", json={"name": "Platform User"})
+    assert user.status_code == 201
+    config = main.build_xray_config()
+    inbound = config["inbounds"][0]
+    assert inbound["listen"] == "127.0.0.1"
+    assert inbound["port"] == main.PLATFORM_WS_PORT
+    assert inbound["streamSettings"]["security"] == "none"
+    assert inbound["streamSettings"]["wsSettings"]["path"] == connection["path"]
+
+    response = client.post("/api/connections", json={"name": "manual", "address": "vpn.example.com", "port": 443})
+    assert response.status_code == 409
+
+    sub = client.post("/api/users/" + user.json()["id"] + "/subscription")
+    assert sub.status_code == 200
+    public_host = "https://testserver"
+    assert sub.json()["url"].startswith(public_host + "/api/subscriptions/")
+
+
+def test_direct_mode_remains_available(client, monkeypatch):
+    monkeypatch.setenv("NOVAPANEL_DEPLOYMENT_MODE", "direct")
+    create_admin(client)
+    status = client.get("/api/deployment")
+    assert status.status_code == 200
+    assert status.json()["mode"] == "direct"
+    assert status.json()["auto_connection"] is False
 
 
 def test_api_docs_are_available(client):

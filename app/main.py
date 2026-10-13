@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -17,7 +18,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode, quote, urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from dotenv import load_dotenv
@@ -26,9 +27,13 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.websockets import WebSocket, WebSocketDisconnect
+import websockets
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 ROOT_DIR = Path(__file__).resolve().parent.parent
+AUTO_CONNECTION_ID = "novapanel-platform-ws"
+PLATFORM_WS_PORT = 10086
 load_dotenv(ROOT_DIR / ".env")
 DATA_DIR = Path(os.getenv("NOVAPANEL_DATA_DIR", str(ROOT_DIR / "data"))).expanduser()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -266,12 +271,117 @@ def admin_count() -> int:
         return int(conn.execute("SELECT COUNT(*) FROM admins").fetchone()[0])
 
 
+def deployment_mode() -> str:
+    """Select direct sockets or a TLS-terminated WebSocket suitable for compatible app hosts."""
+    configured = os.getenv("NOVAPANEL_DEPLOYMENT_MODE", "auto").strip().lower()
+    if configured in {"direct", "paas_ws"}:
+        return configured
+    if configured != "auto":
+        return "direct"
+    markers = (
+        "PORT", "SERVER_PORT", "RAILWAY_PUBLIC_DOMAIN", "RENDER_EXTERNAL_HOSTNAME",
+        "KOYEB_PUBLIC_DOMAIN", "FLY_APP_NAME", "HEROKU_APP_NAME", "SERVICE_FQDN",
+    )
+    return "paas_ws" if any(os.getenv(name) for name in markers) else "direct"
+
+
+def is_platform_ws_mode() -> bool:
+    return deployment_mode() == "paas_ws"
+
+
+def public_host(request: Request | None = None) -> str | None:
+    """Resolve the host used by client links without trusting arbitrary URL fragments."""
+    candidate = os.getenv("NOVAPANEL_PUBLIC_HOST", "").strip()
+    if not candidate:
+        base = os.getenv("NOVAPANEL_PUBLIC_BASE_URL", "").strip()
+        if base:
+            candidate = urlparse(base if "://" in base else "https://" + base).hostname or ""
+    if not candidate:
+        for name in ("RAILWAY_PUBLIC_DOMAIN", "RENDER_EXTERNAL_HOSTNAME", "KOYEB_PUBLIC_DOMAIN", "SERVICE_FQDN"):
+            candidate = os.getenv(name, "").strip()
+            if candidate:
+                break
+    if not candidate and os.getenv("FLY_APP_NAME"):
+        candidate = os.getenv("FLY_APP_NAME", "").strip() + ".fly.dev"
+    if not candidate and os.getenv("HEROKU_APP_NAME"):
+        candidate = os.getenv("HEROKU_APP_NAME", "").strip() + ".herokuapp.com"
+    if not candidate and request is not None:
+        candidate = request.url.hostname or ""
+    candidate = candidate.strip().strip(".").lower()
+    if not candidate or any(char in candidate for char in "/?#@ "):
+        return None
+    try:
+        ipaddress.ip_address(candidate)
+        return candidate
+    except ValueError:
+        if re.fullmatch(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*", candidate):
+            return candidate
+    return None
+
+
 def engine_binary() -> str | None:
     configured = os.getenv("NOVAPANEL_XRAY_BINARY")
     if configured:
         path = Path(configured).expanduser()
         return str(path) if path.is_file() else None
-    return shutil.which("xray")
+    discovered = shutil.which("xray")
+    if discovered:
+        return discovered
+    bundled = ROOT_DIR / "bin" / "xray"
+    return str(bundled) if bundled.is_file() else None
+
+
+def xray_environment(binary: str) -> dict[str, str]:
+    env = os.environ.copy()
+    bundled_assets = ROOT_DIR / "bin"
+    if Path(binary).resolve().parent == bundled_assets.resolve():
+        env["XRAY_LOCATION_ASSET"] = str(bundled_assets)
+    return env
+
+
+def ensure_platform_connection(request: Request | None = None) -> dict | None:
+    """Create one managed WS endpoint; the hosting platform terminates public TLS."""
+    if not is_platform_ws_mode():
+        return None
+    host = public_host(request)
+    if not host:
+        return None
+    with db() as conn:
+        row = conn.execute("SELECT * FROM connections WHERE id = ?", (AUTO_CONNECTION_ID,)).fetchone()
+        if row is None:
+            conn.execute(
+                """INSERT INTO connections
+                   (id, name, address, port, transport, path, service_name, host_header, server_name,
+                    certificate_file, private_key_file, enabled, created_at)
+                   VALUES (?, ?, ?, 443, 'ws', ?, 'novapanel', ?, ?, NULL, NULL, 1, ?)""",
+                (AUTO_CONNECTION_ID, "اتصال خودکار میزبان", host, "/connect/" + secrets.token_urlsafe(24), host, host, now_iso()),
+            )
+        else:
+            conn.execute(
+                """UPDATE connections SET address=?, port=443, transport='ws', host_header=?,
+                   server_name=?, certificate_file=NULL, private_key_file=NULL, enabled=1 WHERE id=?""",
+                (host, host, host, AUTO_CONNECTION_ID),
+            )
+        result = conn.execute("SELECT * FROM connections WHERE id = ?", (AUTO_CONNECTION_ID,)).fetchone()
+    return dict(result) if result is not None else None
+
+
+def maybe_start_auto_engine() -> dict:
+    if not is_platform_ws_mode() or engine_status()["status"] == "running":
+        return {}
+    with db() as conn:
+        clients = conn.execute("SELECT COUNT(*) FROM vpn_users WHERE enabled = 1").fetchone()[0]
+        profile = conn.execute("SELECT COUNT(*) FROM connections WHERE id = ? AND enabled = 1", (AUTO_CONNECTION_ID,)).fetchone()[0]
+    if not clients or not profile:
+        return {}
+    if not engine_binary():
+        return {"engine_applied": False, "message": "کاربر و لینک ساخته می‌شوند، اما موتور Xray در دسترس نیست؛ اجرای VPN تا نصب موتور ممکن نیست."}
+    try:
+        start_engine({})
+        return {"engine_applied": True, "message": "موتور اتصال خودکار اجرا شد."}
+    except Exception as exc:
+        detail = getattr(exc, "detail", str(exc))
+        return {"engine_applied": False, "message": "اتصال خودکار ساخته شد، اما Xray اجرا نشد: " + str(detail)}
 
 
 def clean_user(row: sqlite3.Row) -> dict:
@@ -294,7 +404,9 @@ def clean_user(row: sqlite3.Row) -> dict:
 
 
 def clean_connection(row: sqlite3.Row) -> dict:
-    return {key: row[key] for key in ("id", "name", "address", "port", "transport", "path", "service_name", "host_header", "server_name", "certificate_file", "private_key_file", "created_at")} | {"enabled": bool(row["enabled"]), "tls_ready": bool(row["certificate_file"] and row["private_key_file"] and Path(row["certificate_file"]).is_file() and Path(row["private_key_file"]).is_file())}
+    files_ready = bool(row["certificate_file"] and row["private_key_file"] and Path(row["certificate_file"]).is_file() and Path(row["private_key_file"]).is_file())
+    platform_ready = is_platform_ws_mode() and row["id"] == AUTO_CONNECTION_ID and row["transport"] == "ws"
+    return {key: row[key] for key in ("id", "name", "address", "port", "transport", "path", "service_name", "host_header", "server_name", "certificate_file", "private_key_file", "created_at")} | {"enabled": bool(row["enabled"]), "tls_ready": files_ready or platform_ready, "managed_by_platform": platform_ready}
 
 
 def client_link(user: dict, connection: dict) -> str:
@@ -339,9 +451,13 @@ def disable_expired_users() -> list[str]:
 
 def build_xray_config() -> dict:
     disable_expired_users()
+    platform_ws = is_platform_ws_mode()
     with db() as conn:
         user_rows = conn.execute("SELECT * FROM vpn_users WHERE enabled = 1").fetchall()
-        connection_rows = conn.execute("SELECT * FROM connections WHERE enabled = 1 ORDER BY created_at").fetchall()
+        if platform_ws:
+            connection_rows = conn.execute("SELECT * FROM connections WHERE id = ? AND enabled = 1", (AUTO_CONNECTION_ID,)).fetchall()
+        else:
+            connection_rows = conn.execute("SELECT * FROM connections WHERE enabled = 1 ORDER BY created_at").fetchall()
     if not connection_rows:
         raise ValueError("Create and enable at least one connection first.")
     if not user_rows:
@@ -352,20 +468,28 @@ def build_xray_config() -> dict:
         item = dict(row)
         cert = item.get("certificate_file")
         key = item.get("private_key_file")
-        if not cert or not key or not Path(cert).is_file() or not Path(key).is_file():
-            raise ValueError(f'TLS certificate and private key are required for "{item["name"]}".')
         clients = [{"id": client["client_uuid"], "email": f'np-{client["id"]}@local'} for client in user_rows]
-        method = {"ws": "websocket", "grpc": "grpc", "httpupgrade": "httpupgrade", "xhttp": "xhttp"}[item["transport"]]
-        stream: dict = {"method": method, "security": "tls", "tlsSettings": {"minVersion": "1.2", "alpn": ["h2", "http/1.1"], "certificates": [{"certificateFile": cert, "keyFile": key}]}}
-        if item["transport"] == "ws":
-            stream["wsSettings"] = {"path": item["path"], "host": item["host_header"] or ""}
-        elif item["transport"] == "httpupgrade":
-            stream["httpupgradeSettings"] = {"path": item["path"], "host": item["host_header"] or ""}
-        elif item["transport"] == "grpc":
-            stream["grpcSettings"] = {"serviceName": item["service_name"], "multiMode": False}
-        elif item["transport"] == "xhttp":
-            stream["xhttpSettings"] = {"path": item["path"], "host": item["host_header"] or "", "mode": "auto"}
-        inbounds.append({"tag": f'novapanel-{item["id"][:8]}', "listen": "0.0.0.0", "port": item["port"], "protocol": "vless", "settings": {"clients": clients, "decryption": "none"}, "streamSettings": stream, "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]}})
+        if platform_ws and item["id"] == AUTO_CONNECTION_ID:
+            internal_port = int(os.getenv("NOVAPANEL_XRAY_WS_PORT", str(PLATFORM_WS_PORT)))
+            if internal_port < 1024 or internal_port > 65535 or internal_port == 10085:
+                internal_port = PLATFORM_WS_PORT
+            stream = {"method": "websocket", "security": "none", "wsSettings": {"path": item["path"], "host": ""}}
+            listen_address, inbound_port = "127.0.0.1", internal_port
+        else:
+            if not cert or not key or not Path(cert).is_file() or not Path(key).is_file():
+                raise ValueError(f'TLS certificate and private key are required for "{item["name"]}".')
+            method = {"ws": "websocket", "grpc": "grpc", "httpupgrade": "httpupgrade", "xhttp": "xhttp"}[item["transport"]]
+            stream = {"method": method, "security": "tls", "tlsSettings": {"minVersion": "1.2", "alpn": ["h2", "http/1.1"], "certificates": [{"certificateFile": cert, "keyFile": key}]}}
+            if item["transport"] == "ws":
+                stream["wsSettings"] = {"path": item["path"], "host": item["host_header"] or ""}
+            elif item["transport"] == "httpupgrade":
+                stream["httpupgradeSettings"] = {"path": item["path"], "host": item["host_header"] or ""}
+            elif item["transport"] == "grpc":
+                stream["grpcSettings"] = {"serviceName": item["service_name"], "multiMode": False}
+            elif item["transport"] == "xhttp":
+                stream["xhttpSettings"] = {"path": item["path"], "host": item["host_header"] or "", "mode": "auto"}
+            listen_address, inbound_port = "0.0.0.0", item["port"]
+        inbounds.append({"tag": f'novapanel-{item["id"][:8]}', "listen": listen_address, "port": inbound_port, "protocol": "vless", "settings": {"clients": clients, "decryption": "none"}, "streamSettings": stream, "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]}})
     return {
         "log": {"loglevel": "warning"},
         "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["StatsService"]},
@@ -380,6 +504,31 @@ def build_xray_config() -> dict:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "app": "NovaPanel", "version": APP_VERSION}
+
+
+@app.get("/api/deployment")
+def get_deployment(request: Request, _: dict = Depends(get_admin)) -> dict:
+    mode = deployment_mode()
+    profile = ensure_platform_connection(request) if mode == "paas_ws" else None
+    engine_result = maybe_start_auto_engine()
+    host = profile["address"] if profile else public_host(request)
+    message = (
+        "پروفایل خودکار ساخته شده؛ میزبان باید WebSocket Upgrade و اجرای Xray را مجاز بداند."
+        if profile else
+        "حالت مستقیم فعال است؛ اتصال و گواهی TLS سرور را یک‌بار تعریف کن."
+        if mode == "direct" else
+        "دامنه عمومی میزبان تشخیص داده نشد؛ NOVAPANEL_PUBLIC_HOST را در متغیرهای محیطی تنظیم کن."
+    )
+    return {
+        "mode": mode,
+        "public_host": host,
+        "auto_connection": bool(profile),
+        "xray_available": bool(engine_binary()),
+        "engine_status": engine_status()["status"],
+        "websocket_ingress": "requires-provider-support",
+        "message": message,
+        **engine_result,
+    }
 
 
 @app.get("/api/setup/status")
@@ -399,6 +548,7 @@ def setup(data: SetupInput, request: Request) -> dict:
         admin_id = cur.lastrowid
     request.session.clear()
     request.session["admin_id"] = int(admin_id)
+    ensure_platform_connection(request)
     return {"ok": True}
 
 
@@ -486,6 +636,12 @@ def create_user(data: UserCreate, _: dict = Depends(get_admin)) -> dict:
                WHERE u.id = ?""",
             (user_id,),
         ).fetchone()
+    if is_platform_ws_mode():
+        startup = maybe_start_auto_engine()
+        return clean_user(row) | (startup or {
+            "engine_applied": engine_status()["status"] == "running",
+            "message": "کاربر ساخته شد؛ پروفایل خودکار میزبان استفاده می‌شود. وضعیت واقعی اتصال به پشتیبانی WebSocket میزبان وابسته است.",
+        })
     return clean_user(row) | reconcile_engine()
 
 
@@ -508,6 +664,10 @@ def create_subscription(user_id: str, request: Request, _: dict = Depends(get_ad
     if cur.rowcount == 0:
         raise HTTPException(status_code=409, detail="The user is disabled.")
     base_url = os.getenv("NOVAPANEL_PUBLIC_BASE_URL", "").rstrip("/")
+    if is_platform_ws_mode():
+        host = public_host(request)
+        if host:
+            base_url = "https://" + host
     if not base_url:
         base_url = str(request.base_url).rstrip("/")
     return {
@@ -537,7 +697,7 @@ def read_subscription(token: str) -> PlainTextResponse:
     links = []
     for row in connections_rows:
         connection = clean_connection(row)
-        if connection["tls_ready"]:
+        if connection["tls_ready"] or (is_platform_ws_mode() and row["id"] == AUTO_CONNECTION_ID):
             links.append(client_link(user, connection))
     if not links:
         raise HTTPException(status_code=409, detail="No enabled connection with TLS certificate files is available.")
@@ -611,6 +771,8 @@ def list_connections(_: dict = Depends(get_admin)) -> list[dict]:
 
 @app.post("/api/connections", status_code=201)
 def create_connection(data: ConnectionCreate, _: dict = Depends(get_admin)) -> dict:
+    if is_platform_ws_mode():
+        raise HTTPException(status_code=409, detail="این میزبان از پروفایل خودکار استفاده می‌کند؛ برای ورودی مستقیم NOVAPANEL_DEPLOYMENT_MODE=direct تنظیم کن.")
     if bool(data.certificate_file) != bool(data.private_key_file):
         raise HTTPException(status_code=422, detail="Provide both certificate and private key paths, or leave both empty until setup.")
     connection_id = str(uuid.uuid4())
@@ -622,6 +784,8 @@ def create_connection(data: ConnectionCreate, _: dict = Depends(get_admin)) -> d
 
 @app.put("/api/connections/{connection_id}")
 def update_connection(connection_id: str, data: ConnectionCreate, _: dict = Depends(get_admin)) -> dict:
+    if is_platform_ws_mode():
+        raise HTTPException(status_code=409, detail="پروفایل اتصال در حالت میزبان خودکار مدیریت می‌شود.")
     if bool(data.certificate_file) != bool(data.private_key_file):
         raise HTTPException(status_code=422, detail="Provide both certificate and private key paths, or leave both empty.")
     values = (data.name.strip(), data.address, data.port, data.transport, data.path, data.service_name, data.host_header, data.server_name, data.certificate_file, data.private_key_file, int(data.enabled), connection_id)
@@ -635,6 +799,8 @@ def update_connection(connection_id: str, data: ConnectionCreate, _: dict = Depe
 
 @app.delete("/api/connections/{connection_id}")
 def delete_connection(connection_id: str, _: dict = Depends(get_admin)) -> dict:
+    if is_platform_ws_mode():
+        raise HTTPException(status_code=409, detail="پروفایل اتصال در حالت میزبان خودکار قابل حذف نیست.")
     with db() as conn:
         cur = conn.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
     if cur.rowcount == 0:
@@ -760,7 +926,7 @@ def test_engine_config(_: dict = Depends(get_admin)) -> dict:
     config_path = DATA_DIR / "xray-config.json"
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     try:
-        result = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False)
+        result = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False, env=xray_environment(binary))
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(status_code=500, detail=f"Could not test Xray config: {exc}") from exc
     if result.returncode != 0:
@@ -784,7 +950,7 @@ def start_engine(_: dict = Depends(get_admin)) -> dict[str, str]:
         config_path = DATA_DIR / "xray-config.json"
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         try:
-            check = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False)
+            check = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False, env=xray_environment(binary))
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=500, detail=f"Could not validate Xray config: {exc}") from exc
         if check.returncode != 0:
@@ -792,7 +958,7 @@ def start_engine(_: dict = Depends(get_admin)) -> dict[str, str]:
         log_path = DATA_DIR / "xray.log"
         _ENGINE_LOG_HANDLE = log_path.open("a", encoding="utf-8")
         try:
-            _ENGINE_PROCESS = subprocess.Popen([binary, "run", "-config", str(config_path)], stdin=subprocess.DEVNULL, stdout=_ENGINE_LOG_HANDLE, stderr=subprocess.STDOUT, close_fds=True)
+            _ENGINE_PROCESS = subprocess.Popen([binary, "run", "-config", str(config_path)], stdin=subprocess.DEVNULL, stdout=_ENGINE_LOG_HANDLE, stderr=subprocess.STDOUT, close_fds=True, env=xray_environment(binary))
             time.sleep(0.35)
             if _ENGINE_PROCESS.poll() is not None:
                 _ENGINE_PROCESS = None
@@ -859,6 +1025,58 @@ def reconcile_engine() -> dict:
         "engine_applied": True,
         "message": "تغییرات ذخیره شد و Xray با تنظیمات جدید راه‌اندازی شد.",
     }
+
+@app.websocket("/{requested_path:path}")
+async def platform_websocket_proxy(websocket: WebSocket, requested_path: str) -> None:
+    """Relay a public WebSocket to Xray's private local WS inbound after edge TLS termination."""
+    if not is_platform_ws_mode():
+        await websocket.close(code=1008, reason="WebSocket proxy mode is disabled")
+        return
+    with db() as conn:
+        profile = conn.execute("SELECT * FROM connections WHERE id = ? AND enabled = 1", (AUTO_CONNECTION_ID,)).fetchone()
+    if profile is None or profile["path"].lstrip("/") != requested_path.lstrip("/"):
+        await websocket.close(code=1008, reason="Unknown WebSocket path")
+        return
+    internal_port = int(os.getenv("NOVAPANEL_XRAY_WS_PORT", str(PLATFORM_WS_PORT)))
+    if internal_port < 1024 or internal_port > 65535 or internal_port == 10085:
+        internal_port = PLATFORM_WS_PORT
+    await websocket.accept()
+    try:
+        upstream_url = f"ws://127.0.0.1:{internal_port}{profile['path']}"
+        async with websockets.connect(upstream_url, max_size=None, ping_interval=20, ping_timeout=20, compression=None) as upstream:
+            async def client_to_xray() -> None:
+                while True:
+                    event = await websocket.receive()
+                    if event["type"] == "websocket.disconnect":
+                        return
+                    if event.get("bytes") is not None:
+                        await upstream.send(event["bytes"])
+                    elif event.get("text") is not None:
+                        await upstream.send(event["text"])
+
+            async def xray_to_client() -> None:
+                async for message in upstream:
+                    if isinstance(message, bytes):
+                        await websocket.send_bytes(message)
+                    else:
+                        await websocket.send_text(message)
+
+            tasks = {asyncio.create_task(client_to_xray()), asyncio.create_task(xray_to_client())}
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                try:
+                    task.result()
+                except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+                    pass
+    except Exception:
+        try:
+            await websocket.close(code=1011, reason="Xray upstream is unavailable")
+        except Exception:
+            pass
+
 
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 if FRONTEND_DIST.is_dir():

@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -21,6 +22,7 @@ from urllib.parse import urlencode, quote
 from fastapi import Depends, FastAPI, HTTPException, Request
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -183,6 +185,7 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 client_uuid TEXT NOT NULL UNIQUE,
+                subscription_token_hash TEXT UNIQUE,
                 quota_gb INTEGER,
                 expires_at TEXT,
                 enabled INTEGER NOT NULL DEFAULT 1,
@@ -210,6 +213,9 @@ def init_db() -> None:
                 last_synced_at TEXT
             );
         """)
+        user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(vpn_users)")}
+        if "subscription_token_hash" not in user_columns:
+            conn.execute("ALTER TABLE vpn_users ADD COLUMN subscription_token_hash TEXT")
         conn.execute("INSERT OR IGNORE INTO traffic_usage(user_id) SELECT id FROM vpn_users")
 
 
@@ -468,6 +474,58 @@ def create_user(data: UserCreate, _: dict = Depends(get_admin)) -> dict:
             (user_id,),
         ).fetchone()
     return clean_user(row) | reconcile_engine()
+
+
+@app.post("/api/users/{user_id}/subscription")
+def create_subscription(user_id: str, request: Request, _: dict = Depends(get_admin)) -> dict[str, str]:
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE vpn_users SET subscription_token_hash = ? WHERE id = ?",
+            (token_hash, user_id),
+        )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="User not found.")
+    base_url = os.getenv("NOVAPANEL_PUBLIC_BASE_URL", "").rstrip("/")
+    if not base_url:
+        base_url = str(request.base_url).rstrip("/")
+    return {
+        "url": base_url + "/api/subscriptions/" + token,
+        "message": "Subscription link created. Creating another link will revoke this one.",
+    }
+
+
+@app.get("/api/subscriptions/{token}", response_class=PlainTextResponse)
+def read_subscription(token: str) -> PlainTextResponse:
+    disable_expired_users()
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    with db() as conn:
+        user_row = conn.execute(
+            """SELECT u.*, t.up_bytes, t.down_bytes, t.last_synced_at
+               FROM vpn_users u
+               LEFT JOIN traffic_usage t ON t.user_id = u.id
+               WHERE u.subscription_token_hash = ? AND u.enabled = 1""",
+            (token_hash,),
+        ).fetchone()
+        connections_rows = conn.execute(
+            "SELECT * FROM connections WHERE enabled = 1 ORDER BY created_at"
+        ).fetchall()
+    if user_row is None:
+        raise HTTPException(status_code=404, detail="Subscription not found or inactive.")
+    user = clean_user(user_row)
+    links = []
+    for row in connections_rows:
+        connection = clean_connection(row)
+        if connection["tls_ready"]:
+            links.append(client_link(user, connection))
+    if not links:
+        raise HTTPException(status_code=409, detail="No enabled connection with TLS certificate files is available.")
+    encoded = base64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
+    return PlainTextResponse(
+        encoded,
+        headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
+    )
 
 
 @app.put("/api/users/{user_id}")

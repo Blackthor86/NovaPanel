@@ -7,6 +7,7 @@ import app.main as main
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.sqlite3")
+    monkeypatch.setenv("NOVAPANEL_DEPLOYMENT_MODE", "direct")
     main.init_db()
     with TestClient(main.app) as test_client:
         yield test_client

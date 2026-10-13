@@ -465,7 +465,7 @@ def create_user(data: UserCreate, _: dict = Depends(get_admin)) -> dict:
                WHERE u.id = ?""",
             (user_id,),
         ).fetchone()
-    return clean_user(row)
+    return clean_user(row) | reconcile_engine()
 
 
 @app.put("/api/users/{user_id}")
@@ -494,7 +494,7 @@ def update_user(user_id: str, data: UserUpdate, _: dict = Depends(get_admin)) ->
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="User not found.")
-    return clean_user(row)
+    return clean_user(row) | reconcile_engine()
 
 
 @app.delete("/api/users/{user_id}")
@@ -503,7 +503,7 @@ def delete_user(user_id: str, _: dict = Depends(get_admin)) -> dict[str, bool]:
         cur = conn.execute("DELETE FROM vpn_users WHERE id = ?", (user_id,))
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="User not found.")
-    return {"ok": True}
+    return {"ok": True, **reconcile_engine()}
 
 
 @app.get("/api/connections")
@@ -521,7 +521,7 @@ def create_connection(data: ConnectionCreate, _: dict = Depends(get_admin)) -> d
     with db() as conn:
         conn.execute("INSERT INTO connections(id, name, address, port, transport, path, service_name, host_header, server_name, certificate_file, private_key_file, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (connection_id, data.name.strip(), data.address, data.port, data.transport, data.path, data.service_name, data.host_header, data.server_name, data.certificate_file, data.private_key_file, int(data.enabled), now_iso()))
         row = conn.execute("SELECT * FROM connections WHERE id = ?", (connection_id,)).fetchone()
-    return clean_connection(row)
+    return clean_connection(row) | reconcile_engine()
 
 
 @app.put("/api/connections/{connection_id}")
@@ -534,7 +534,7 @@ def update_connection(connection_id: str, data: ConnectionCreate, _: dict = Depe
         row = conn.execute("SELECT * FROM connections WHERE id=?", (connection_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Connection not found.")
-    return clean_connection(row)
+    return clean_connection(row) | reconcile_engine()
 
 
 @app.delete("/api/connections/{connection_id}")
@@ -543,7 +543,7 @@ def delete_connection(connection_id: str, _: dict = Depends(get_admin)) -> dict[
         cur = conn.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Connection not found.")
-    return {"ok": True}
+    return {"ok": True, **reconcile_engine()}
 
 
 @app.get("/api/connections/{connection_id}/links")
@@ -734,3 +734,30 @@ def get_engine_log(_: dict = Depends(get_admin)) -> dict[str, str]:
     if not log_path.is_file():
         return {"log": ""}
     return {"log": log_path.read_text(encoding="utf-8", errors="replace")[-12000:]}
+
+def reconcile_engine() -> dict:
+    if engine_status()["status"] != "running":
+        return {
+            "engine_applied": False,
+            "message": "ذخیره شد؛ تغییرات در اجرای بعدی Xray اعمال می‌شوند.",
+        }
+
+    sync_traffic_counters()
+    stop_engine({})
+    try:
+        start_engine({})
+    except HTTPException as exc:
+        return {
+            "engine_applied": False,
+            "message": "تنظیمات ذخیره شد، اما Xray شروع نشد: " + str(exc.detail),
+        }
+    except Exception:
+        return {
+            "engine_applied": False,
+            "message": "تنظیمات ذخیره شد، اما Xray شروع نشد. لاگ موتور را بررسی کن.",
+        }
+    return {
+        "engine_applied": True,
+        "message": "تغییرات ذخیره شد و Xray با تنظیمات جدید راه‌اندازی شد.",
+    }
+

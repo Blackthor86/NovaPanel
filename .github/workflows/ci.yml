@@ -4,48 +4,37 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  frontend:
+  runtime:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - run: npm install
-      - run: npm run build
-
-  node-runtime:
-    runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install
-      - run: npm test
-
-      - name: Package Node.js deployment ZIP
-        if: github.ref == 'refs/heads/main'
+          cache: npm
+      - name: Install runtime dependencies
+        run: npm install
+      - name: Syntax and integration tests
+        run: npm test
+      - name: Package lightweight deployment ZIP
         run: |
-          rm -rf deploy-package NovaPanel-node-deploy.zip
-          mkdir deploy-package
-          cp -R server build scripts frontend package.json package-lock.json tsconfig.json README.md SECURITY.md LICENSE .env.example deploy-package/
-          rm -rf deploy-package/frontend/node_modules deploy-package/frontend/.vite
+          rm -rf deploy-package NovaPanel-blue-knight-lite.zip
+          mkdir -p deploy-package/docs
+          cp index.js package.json package-lock.json README.md SECURITY.md LICENSE .env.example deploy-package/
+          cp docs/SETUP_FA.md deploy-package/docs/SETUP_FA.md
           cd deploy-package
-          zip -qr ../NovaPanel-node-deploy.zip .
-      - name: Upload Node.js deployment ZIP
-        if: github.ref == 'refs/heads/main'
+          zip -qr ../NovaPanel-blue-knight-lite.zip .
+      - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NovaPanel-node-deploy
-          path: NovaPanel-node-deploy.zip
+          name: ${{ github.event_name == 'pull_request' && 'NovaPanel-blue-knight-lite-preview' || 'NovaPanel-node-deploy' }}
+          path: NovaPanel-blue-knight-lite.zip
           if-no-files-found: error
           retention-days: 30

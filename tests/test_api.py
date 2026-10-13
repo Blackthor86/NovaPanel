@@ -225,3 +225,22 @@ def test_subscription_links_are_revocable_and_return_active_profiles(client, tmp
     assert rotated.status_code == 200
     assert client.get(old_path).status_code == 404
     assert client.get(urlparse(rotated.json()["url"]).path).status_code == 200
+
+
+def test_user_traffic_can_be_reset(client):
+    create_admin(client)
+    created = client.post("/api/users", json={"name": "Reset User", "quota_gb": 10})
+    assert created.status_code == 201
+    user_id = created.json()["id"]
+    with main.db() as conn:
+        conn.execute(
+            "UPDATE traffic_usage SET up_bytes = ?, down_bytes = ? WHERE user_id = ?",
+            (4096, 8192, user_id),
+        )
+
+    response = client.post("/api/users/" + user_id + "/reset-traffic")
+    assert response.status_code == 200
+    user = client.get("/api/users").json()[0]
+    assert user["used_bytes"] == 0
+    assert user["up_bytes"] == 0
+    assert user["down_bytes"] == 0

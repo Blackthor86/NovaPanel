@@ -14,11 +14,11 @@ test("single start command serves health endpoint from built artifact", async ()
     cwd: root,
     env: {
       ...process.env,
-      PORT: String(port),
-      SERVER_PORT: "",
+      PORT: String(port + 10000),
+      SERVER_PORT: String(port),
       NOVAPANEL_DATA_DIR: dataDir,
       NOVAPANEL_SECRET_KEY: "test-only-secret-that-is-long-enough-for-start-test",
-      NOVAPANEL_DEPLOYMENT_MODE: "direct",
+      NOVAPANEL_DEPLOYMENT_MODE: "paas_ws",
       NOVAPANEL_XRAY_BINARY: ""
     },
     stdio: ["ignore", "pipe", "pipe"]

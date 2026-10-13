@@ -82,7 +82,8 @@ function createSelfSignedCertificate(commonName = "localhost") {
   const now = new Date();
   const expiry = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
   const serial = crypto.randomBytes(8);
-  serial[0] &= 0x7f;
+  // DER INTEGERs must be minimally encoded; forcing a nonzero first byte avoids rare invalid certificates.
+  serial[0] = (serial[0] & 0x7f) | 0x01;
   const tbs = derSequence(
     asn1(0xa0, derInteger(2)),
     derInteger(serial),

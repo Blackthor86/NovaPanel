@@ -148,3 +148,37 @@ def test_xray_config_uses_current_transport_settings(client, tmp_path):
     assert inbound["streamSettings"]["method"] == "websocket"
     assert inbound["streamSettings"]["wsSettings"]["host"] == "vpn.example.com"
     assert inbound["streamSettings"]["security"] == "tls"
+    assert config["stats"] == {}
+    assert config["api"]["listen"] == "127.0.0.1:10085"
+    assert config["policy"]["levels"]["0"]["statsUserUplink"] is True
+    assert config["policy"]["levels"]["0"]["statsUserDownlink"] is True
+
+
+def test_expired_users_are_disabled(client):
+    create_admin(client)
+    created = client.post(
+        "/api/users",
+        json={"name": "Expired User", "expires_at": "2000-01-01T00:00:00+00:00"},
+    )
+    assert created.status_code == 201
+    user_id = created.json()["id"]
+
+    assert user_id in main.disable_expired_users()
+    users = client.get("/api/users").json()
+    assert users[0]["enabled"] is False
+
+
+def test_quota_is_enforced_from_recorded_traffic(client):
+    create_admin(client)
+    created = client.post("/api/users", json={"name": "Limited User", "quota_gb": 1})
+    assert created.status_code == 201
+    user_id = created.json()["id"]
+
+    with main.db() as conn:
+        conn.execute(
+            "UPDATE traffic_usage SET up_bytes = ? WHERE user_id = ?",
+            (1024 ** 3, user_id),
+        )
+
+    assert user_id in main.disable_expired_users()
+    assert client.get("/api/users").json()[0]["enabled"] is False

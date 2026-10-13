@@ -12,3 +12,8 @@ frontend/dist/
 .DS_Store
 .idea/
 .vscode/
+
+data/
+*.sqlite3
+*.db
+*.log

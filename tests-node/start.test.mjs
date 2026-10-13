@@ -209,7 +209,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
           security: "tls",
           tlsSettings: {
             serverName: "127.0.0.1",
-            allowInsecure: true,
+            pinnedPeerCertSha256: status.tls_fingerprint,
             alpn: ["http/1.1"]
           },
           wsSettings: {

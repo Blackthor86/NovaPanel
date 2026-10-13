@@ -331,6 +331,14 @@ def engine_binary() -> str | None:
     return str(bundled) if bundled.is_file() else None
 
 
+def xray_environment(binary: str) -> dict[str, str]:
+    env = os.environ.copy()
+    bundled_assets = ROOT_DIR / "bin"
+    if Path(binary).resolve().parent == bundled_assets.resolve():
+        env["XRAY_LOCATION_ASSET"] = str(bundled_assets)
+    return env
+
+
 def ensure_platform_connection(request: Request | None = None) -> dict | None:
     """Create one managed WS endpoint; the hosting platform terminates public TLS."""
     if not is_platform_ws_mode():
@@ -918,7 +926,7 @@ def test_engine_config(_: dict = Depends(get_admin)) -> dict:
     config_path = DATA_DIR / "xray-config.json"
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     try:
-        result = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False)
+        result = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False, env=xray_environment(binary))
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(status_code=500, detail=f"Could not test Xray config: {exc}") from exc
     if result.returncode != 0:
@@ -942,7 +950,7 @@ def start_engine(_: dict = Depends(get_admin)) -> dict[str, str]:
         config_path = DATA_DIR / "xray-config.json"
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         try:
-            check = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False)
+            check = subprocess.run([binary, "run", "-test", "-config", str(config_path)], capture_output=True, text=True, timeout=20, check=False, env=xray_environment(binary))
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=500, detail=f"Could not validate Xray config: {exc}") from exc
         if check.returncode != 0:
@@ -950,11 +958,7 @@ def start_engine(_: dict = Depends(get_admin)) -> dict[str, str]:
         log_path = DATA_DIR / "xray.log"
         _ENGINE_LOG_HANDLE = log_path.open("a", encoding="utf-8")
         try:
-            process_env = os.environ.copy()
-            bundled_assets = ROOT_DIR / "bin"
-            if Path(binary).resolve().parent == bundled_assets.resolve():
-                process_env["XRAY_LOCATION_ASSET"] = str(bundled_assets)
-            _ENGINE_PROCESS = subprocess.Popen([binary, "run", "-config", str(config_path)], stdin=subprocess.DEVNULL, stdout=_ENGINE_LOG_HANDLE, stderr=subprocess.STDOUT, close_fds=True, env=process_env)
+            _ENGINE_PROCESS = subprocess.Popen([binary, "run", "-config", str(config_path)], stdin=subprocess.DEVNULL, stdout=_ENGINE_LOG_HANDLE, stderr=subprocess.STDOUT, close_fds=True, env=xray_environment(binary))
             time.sleep(0.35)
             if _ENGINE_PROCESS.poll() is not None:
                 _ENGINE_PROCESS = None

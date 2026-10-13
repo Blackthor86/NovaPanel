@@ -1,13 +1,13 @@
 # NovaPanel
 
-NovaPanel is a self-hosted management panel for proxy-engine deployments, built around a Python API and a responsive web interface.
+NovaPanel 0.4.0 is a self-hosted management panel for proxy-engine deployments, built around a Python API and a responsive web interface.
 
 **Project status:** active development. The current build includes the dashboard, one-time admin setup, session login, local SQLite storage, user and connection profile management, host capability reporting, and optional Xray process controls when an operator installs and verifies the engine. It has not yet had an independent security review and should not be exposed directly to the public internet.
 
 ## What is included
 
 - Persian RTL dashboard with a jade and navy theme, responsive layout, and motion effects
-- First-run admin account creation and session-based login
+- First-run admin password setup (no username) and password-only session login
 - User UUID generation and management, including traffic totals, quota and expiry enforcement
 - Connection profile management for WS, gRPC, HTTPUpgrade, and XHTTP settings
 - Individual VLESS link export when certificate and private-key paths are present
@@ -33,7 +33,7 @@ Install Python 3.11+ and Node.js 20+.
 1. Double-click `run-backend-windows.bat`. Keep its window open.
 2. Double-click `run-frontend-windows.bat`. Keep its window open.
 3. Open the local URL printed by Vite, usually `http://127.0.0.1:5173`.
-4. On first launch, create an admin account with a username and a strong password of at least 14 characters.
+4. On first launch, choose a strong admin password of at least 14 characters. No username is needed.
 
 PowerShell users can also follow [the detailed Persian setup guide](docs/SETUP_FA.md). The launcher uses `npm.cmd` so it does not require changing PowerShell's script execution policy.
 

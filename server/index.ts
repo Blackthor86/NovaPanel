@@ -4,8 +4,8 @@ import cookieSession from "cookie-session";
 import cors from "cors";
 import Database from "better-sqlite3";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { accessSync, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
@@ -146,18 +146,7 @@ function engineBinary(): string | null {
   }
   return null;
 }
-function accessSyncExecutable(path: string) {
-  const fs = requireFs();
-  fs.accessSync(path, constants.X_OK);
-}
-function requireFs() {
-  // Kept as a tiny wrapper so Xray lookup does not depend on a shell executable.
-  return { accessSync: (path: string, mode: number) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require("node:fs") as typeof import("node:fs");
-    fs.accessSync(path, mode);
-  }};
-}
+function accessSyncExecutable(path: string) { accessSync(path, constants.X_OK); }
 function xrayEnvironment(binary: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
   if (resolve(dirname(binary)) === resolve(ROOT, "bin")) env.XRAY_LOCATION_ASSET = join(ROOT, "bin");
@@ -422,8 +411,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", true);
 app.use(express.json({ limit: "64kb" }));
 const origins = (process.env.NOVAPANEL_CORS_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173").split(",").map((v) => v.trim()).filter(Boolean);
-app.use(cors({ origin: (origin, callback) => callback(null, !origin || origins.includes(origin) || origin === publicOriginFromHeaders(origin)), credentials: true, methods: ["GET", "POST", "PUT", "DELETE"], allowedHeaders: ["Content-Type"] }));
-function publicOriginFromHeaders(origin: string) { return origin; }
+app.use(cors({ origin: (origin, callback) => callback(null, !origin || origins.includes(origin)), credentials: true, methods: ["GET", "POST", "PUT", "DELETE"], allowedHeaders: ["Content-Type"] }));
 app.use(cookieSession({ name: "novapanel_session", keys: [SESSION_SECRET], maxAge: 12 * 60 * 60 * 1000, httpOnly: true, sameSite: "strict", secure: COOKIE_SECURE }));
 app.use((req, _res, next) => { if (req.url.startsWith("/api/") && req.method === "OPTIONS") return next(); next(); });
 
@@ -481,17 +469,7 @@ app.get("/api/host", auth, (_req, res) => {
   };
   res.json({ platform: process.platform, node_version: process.version, data_directory: DATA_DIR, capabilities });
 });
-function accessSyncWritable(path: string) {
-  const fs = requireFsWritable();
-  fs.accessSync(path, constants.W_OK);
-}
-function requireFsWritable() {
-  return { accessSync: (path: string, mode: number) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require("node:fs") as typeof import("node:fs");
-    fs.accessSync(path, mode);
-  }};
-}
+function accessSyncWritable(path: string) { accessSync(path, constants.W_OK); }
 
 app.get("/api/dashboard", auth, (_req, res) => {
   disableExpiredUsers();

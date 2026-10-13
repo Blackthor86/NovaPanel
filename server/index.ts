@@ -401,19 +401,37 @@ async function reconcileEngine(): Promise<Row> {
   try { await startEngine(); return { engine_applied: true, message: "تغییرات ذخیره شد و Xray با تنظیمات جدید راه‌اندازی شد." }; }
   catch (error) { return { engine_applied: false, message: "تنظیمات ذخیره شد، اما Xray شروع نشد: " + (error instanceof Error ? error.message : String(error)) }; }
 }
+let autoEngineStartup: Promise<void> | null = null;
+function scheduleAutoEngineStart(): void {
+  if (autoEngineStartup) return;
+  autoEngineStartup = (async () => {
+    try {
+      if (!engineBinary()) await ensureXrayInstalled();
+      if (!engineBinary()) {
+        console.warn("[NovaPanel] Xray is unavailable; the panel remains online.");
+        return;
+      }
+      const clients = Number((db.prepare("SELECT COUNT(*) AS n FROM vpn_users WHERE enabled=1").get() as Row).n);
+      const profile = Number((db.prepare("SELECT COUNT(*) AS n FROM connections WHERE id=? AND enabled=1").get(AUTO_CONNECTION_ID) as Row).n);
+      if (isPlatformWsMode() && clients && profile && engineStatus().status !== "running") await startEngine();
+    } catch (error) {
+      console.error("[NovaPanel] Automatic Xray startup failed; panel remains online:", error);
+    } finally {
+      autoEngineStartup = null;
+    }
+  })();
+}
 async function maybeStartAutoEngine(): Promise<Row> {
   if (!isPlatformWsMode() || engineStatus().status === "running") return {};
   const clients = Number((db.prepare("SELECT COUNT(*) AS n FROM vpn_users WHERE enabled=1").get() as Row).n);
   const profile = Number((db.prepare("SELECT COUNT(*) AS n FROM connections WHERE id=? AND enabled=1").get(AUTO_CONNECTION_ID) as Row).n);
   if (!clients || !profile) return {};
-  try {
-    if (!engineBinary()) await ensureXrayInstalled();
-    if (!engineBinary()) return { engine_applied: false, message: "کاربر و لینک ساخته شدند؛ نصب یا اجرای خودکار Xray روی این میزبان ممکن نشد. لاگ راه‌اندازی را بررسی کن." };
-    await startEngine();
-    return { engine_applied: true, message: "موتور اتصال خودکار اجرا شد." };
-  } catch (error) {
-    return { engine_applied: false, message: "اتصال خودکار ساخته شد، اما Xray اجرا نشد: " + (error instanceof Error ? error.message : String(error)) };
+  if (!engineBinary()) {
+    scheduleAutoEngineStart();
+    return { engine_applied: false, message: "کاربر ساخته شد؛ نصب و اجرای موتور Xray در پس‌زمینه انجام می‌شود و پنل آنلاین می‌ماند." };
   }
+  try { await startEngine(); return { engine_applied: true, message: "موتور اتصال خودکار اجرا شد." }; }
+  catch (error) { return { engine_applied: false, message: "اتصال خودکار ساخته شد، اما Xray اجرا نشد: " + (error instanceof Error ? error.message : String(error)) }; }
 }
 
 app.disable("x-powered-by");
@@ -654,6 +672,7 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
 let xrayBootstrapPromise: Promise<boolean> | null = null;
 function ensureXrayInstalled(): Promise<boolean> {
   if (engineBinary()) return Promise.resolve(true);
+  if (/^(0|false|no)$/i.test(process.env.NOVAPANEL_AUTO_INSTALL_XRAY || "1")) return Promise.resolve(false);
   if (!isPlatformWsMode() || process.platform !== "linux") return Promise.resolve(false);
   if (!xrayBootstrapPromise) {
     xrayBootstrapPromise = bootstrapXray().finally(() => { xrayBootstrapPromise = null; });

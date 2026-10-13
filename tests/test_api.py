@@ -15,7 +15,7 @@ def client(tmp_path, monkeypatch):
 def create_admin(client):
     response = client.post(
         "/api/setup",
-        json={"username": "nova_admin", "password": "a-long-and-secure-test-passphrase"},
+        json={"password": "a-long-and-secure-test-passphrase"},
     )
     assert response.status_code == 200
 
@@ -50,7 +50,7 @@ def test_setup_can_only_be_completed_once(client):
     create_admin(client)
     response = client.post(
         "/api/setup",
-        json={"username": "second_admin", "password": "another-long-and-secure-passphrase"},
+        json={"password": "another-long-and-secure-passphrase"},
     )
     assert response.status_code == 409
 

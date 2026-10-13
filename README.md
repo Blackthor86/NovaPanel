@@ -57,11 +57,17 @@ npm.cmd install
 npm.cmd run dev
 ```
 
+## Run the built dashboard and API on a Linux host
+
+If the provider has both Python and Node.js available, run `sh run-host.sh`. It installs the app dependencies, builds the React UI, then serves the dashboard and API from the same origin using the provider's `PORT` value (or port 8000 locally). Configure a stable `NOVAPANEL_SECRET_KEY`, `NOVAPANEL_COOKIE_SECURE=1` behind HTTPS, and `NOVAPANEL_PUBLIC_BASE_URL=https://your-public-panel.example` in the provider's environment settings. Keep a persistent volume mounted at `NOVAPANEL_DATA_DIR`.
+
+This combines the web dashboard and API only. It does **not** make a provider's HTTP-only app port suitable for a separate raw Xray inbound. Xray still requires an installed/verified binary and a network path the provider explicitly permits. A hosting platform that only exposes a web-proxied port needs a separately designed, provider-permitted adapter; this build does not bypass host networking restrictions.
+
 ## Xray integration
 
 NovaPanel does not download or update Xray automatically. Install a release from a trusted official source, verify it, then set `NOVAPANEL_XRAY_BINARY` to its full path if it is not on PATH. Configure a connection with a valid TLS certificate and matching private key before testing the generated Xray configuration.
 
-A saved connection is not a working connection by itself. DNS, firewall rules, the host provider's network policy, TLS validity, the client configuration, and the actual network path still need to be checked.
+A saved connection is not a working connection by itself. DNS, firewall rules, the host provider's network policy, TLS validity, the client configuration, and the actual network path still need to be checked. The single-port web hosting launcher serves the management UI only; it does not multiplex client proxy traffic through the web port.
 
 ## Configuration and security
 

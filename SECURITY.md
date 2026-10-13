@@ -15,9 +15,9 @@ NovaPanel is under active development. Do not expose the current build directly 
 
 ## Known limitations
 
-- Traffic quotas and expiry metadata can be stored, but automatic traffic accounting and enforcement are not implemented yet.
+- Traffic totals are polled from Xray every 15 seconds while it is running. Quota/expiry enforcement can lag by one polling interval; the final few seconds of traffic can be lost if the engine or host exits before the next successful poll.
 - Network reachability is not inferred from the presence of a port or runtime.
-- Engine process management is local to the API process and has not yet been hardened for multi-worker or production service supervision.
+- Engine process management and the traffic monitor are local to the API process and have not yet been hardened for multi-worker or production service supervision.
 - The default session secret is temporary for local development; remote deployments must set a stable secret.
 
 ## Reporting a vulnerability

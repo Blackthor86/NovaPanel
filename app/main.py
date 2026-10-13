@@ -37,6 +37,8 @@ _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _ENGINE_LOCK = threading.Lock()
 _ENGINE_PROCESS: subprocess.Popen | None = None
 _ENGINE_LOG_HANDLE = None
+_TRAFFIC_MONITOR_STOP = threading.Event()
+_TRAFFIC_MONITOR_THREAD: threading.Thread | None = None
 
 
 class Capability(BaseModel):
@@ -208,6 +210,7 @@ def init_db() -> None:
                 last_synced_at TEXT
             );
         """)
+        conn.execute("INSERT OR IGNORE INTO traffic_usage(user_id) SELECT id FROM vpn_users")
 
 
 init_db()
@@ -563,6 +566,96 @@ def engine_status() -> dict[str, str]:
     return {"status": "running" if _ENGINE_PROCESS.poll() is None else "stopped"}
 
 
+def sync_traffic_counters() -> bool:
+    binary = engine_binary()
+    if not binary:
+        return False
+    try:
+        result = subprocess.run(
+            [binary, "api", "statsquery", "--server=127.0.0.1:10085", "--pattern", "user>>>", "--reset"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        payload = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return False
+
+    counters: dict[str, dict[str, int]] = {}
+    for item in payload.get("stat") or []:
+        parts = str(item.get("name", "")).split(">>>")
+        if len(parts) != 4 or parts[0] != "user" or parts[2] != "traffic":
+            continue
+        email = parts[1]
+        if not email.startswith("np-") or not email.endswith("@local"):
+            continue
+        user_id = email[3:-6]
+        if parts[3] not in {"uplink", "downlink"}:
+            continue
+        try:
+            value = max(0, int(item.get("value", 0)))
+        except (TypeError, ValueError):
+            continue
+        counters.setdefault(user_id, {"uplink": 0, "downlink": 0})[parts[3]] += value
+
+    with db() as conn:
+        for user_id, values in counters.items():
+            conn.execute(
+                """UPDATE traffic_usage
+                   SET up_bytes = up_bytes + ?, down_bytes = down_bytes + ?, last_synced_at = ?
+                   WHERE user_id = ?""",
+                (values["uplink"], values["downlink"], now_iso(), user_id),
+            )
+    return True
+
+
+def traffic_monitor(stop_event: threading.Event) -> None:
+    while not stop_event.wait(15):
+        if engine_status()["status"] != "running":
+            return
+        try:
+            disabled = disable_expired_users()
+            if disabled:
+                stop_engine({})
+                try:
+                    start_engine({})
+                except Exception:
+                    with (DATA_DIR / "xray.log").open("a", encoding="utf-8") as log:
+                        log.write("\\n[NovaPanel] Engine restart failed after an account was disabled. Check the configuration.\\n")
+                return
+
+            if not sync_traffic_counters():
+                continue
+
+            disabled = disable_expired_users()
+            if disabled:
+                stop_engine({})
+                try:
+                    start_engine({})
+                except Exception:
+                    with (DATA_DIR / "xray.log").open("a", encoding="utf-8") as log:
+                        log.write("\\n[NovaPanel] Engine restart failed after a quota or expiry limit was reached.\\n")
+                return
+        except Exception:
+            continue
+
+
+def start_traffic_monitor() -> None:
+    global _TRAFFIC_MONITOR_STOP, _TRAFFIC_MONITOR_THREAD
+    _TRAFFIC_MONITOR_STOP.set()
+    _TRAFFIC_MONITOR_STOP = threading.Event()
+    _TRAFFIC_MONITOR_THREAD = threading.Thread(
+        target=traffic_monitor,
+        args=(_TRAFFIC_MONITOR_STOP,),
+        daemon=True,
+        name="novapanel-traffic",
+    )
+    _TRAFFIC_MONITOR_THREAD.start()
+
+
 @app.get("/api/engine/status")
 def get_engine_status(_: dict = Depends(get_admin)) -> dict[str, str]:
     return engine_status()
@@ -622,12 +715,14 @@ def start_engine(_: dict = Depends(get_admin)) -> dict[str, str]:
         except OSError as exc:
             _ENGINE_PROCESS = None
             raise HTTPException(status_code=500, detail=f"Could not start Xray: {exc}") from exc
+        start_traffic_monitor()
         return {"status": "running"}
 
 
 @app.post("/api/engine/stop")
 def stop_engine(_: dict = Depends(get_admin)) -> dict[str, str]:
     global _ENGINE_PROCESS, _ENGINE_LOG_HANDLE
+    _TRAFFIC_MONITOR_STOP.set()
     with _ENGINE_LOCK:
         if _ENGINE_PROCESS is None or _ENGINE_PROCESS.poll() is not None:
             _ENGINE_PROCESS = None

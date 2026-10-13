@@ -12,7 +12,9 @@ if [ "${NOVAPANEL_DEPLOYMENT_MODE:-auto}" = "paas_ws" ] || {
   { [ -n "${PORT:-}" ] || [ -n "${SERVER_PORT:-}" ] || [ -n "${RAILWAY_PUBLIC_DOMAIN:-}" ] || [ -n "${RENDER_EXTERNAL_HOSTNAME:-}" ] || [ -n "${KOYEB_PUBLIC_DOMAIN:-}" ]; }
 }; then
   if ! command -v xray >/dev/null 2>&1 && [ ! -x "$ROOT_DIR/bin/xray" ]; then
-    python tools/bootstrap_xray.py
+    if ! python tools/bootstrap_xray.py; then
+      echo "[NovaPanel] Xray bootstrap failed; dashboard will start, but the VPN engine will remain unavailable."
+    fi
   fi
 fi
 

@@ -114,4 +114,37 @@ def test_host_report_does_not_guess_network_support(client):
 def test_api_docs_are_available(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
-    assert response.json()["info"]["title"] == "NovaPanel"
+    assert response.json()["info"]["title"] == "NovaPanel API"
+
+
+
+def test_xray_config_uses_current_transport_settings(client, tmp_path):
+    create_admin(client)
+    user = client.post("/api/users", json={"name": "Config User"})
+    assert user.status_code == 201
+
+    certificate = tmp_path / "fullchain.pem"
+    private_key = tmp_path / "privkey.pem"
+    certificate.write_text("test certificate", encoding="utf-8")
+    private_key.write_text("test private key", encoding="utf-8")
+
+    connection = client.post(
+        "/api/connections",
+        json={
+            "name": "WS profile",
+            "address": "vpn.example.com",
+            "port": 443,
+            "transport": "ws",
+            "path": "/ray",
+            "host_header": "vpn.example.com",
+            "certificate_file": str(certificate),
+            "private_key_file": str(private_key),
+        },
+    )
+    assert connection.status_code == 201
+
+    config = main.build_xray_config()
+    inbound = config["inbounds"][0]
+    assert inbound["streamSettings"]["method"] == "websocket"
+    assert inbound["streamSettings"]["wsSettings"]["host"] == "vpn.example.com"
+    assert inbound["streamSettings"]["security"] == "tls"

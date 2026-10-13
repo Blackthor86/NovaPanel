@@ -67,3 +67,35 @@ test("host capabilities are explicit and API errors are JSON", async () => {
   assert.ok(invalid.body.detail);
   await client.get("/openapi.json").expect(200);
 });
+
+test("app-host mode creates a managed WebSocket profile and usable subscription payload", async () => {
+  process.env.NOVAPANEL_DEPLOYMENT_MODE = "paas_ws";
+  try {
+    const deployment = await client.get("/api/deployment").expect(200);
+    assert.equal(deployment.body.mode, "paas_ws");
+    assert.equal(deployment.body.auto_connection, true);
+    const connections = await client.get("/api/connections").expect(200);
+    const managed = connections.body.find((connection) => connection.managed_by_platform);
+    assert.ok(managed);
+    assert.equal(managed.port, 443);
+    assert.match(managed.path, /^\/connect\//);
+
+    const user = await client.post("/api/users").send({ name: "Auto WS User", quota_gb: 5 }).expect(201);
+    const subscription = await client.post(`/api/users/${user.body.id}/subscription`).expect(200);
+    const raw = await client.get(new URL(subscription.body.url).pathname).expect(200);
+    const link = Buffer.from(raw.text, "base64").toString("utf8");
+    assert.match(link, /^vless:\/\//);
+    assert.match(link, /@127\.0\.0\.1:443\?/);
+    assert.ok(link.includes(encodeURIComponent(managed.path)));
+
+    const { buildXrayConfig } = await import("../build/server/index.js");
+    const config = buildXrayConfig();
+    assert.equal(config.inbounds.length, 1);
+    assert.equal(config.inbounds[0].listen, "127.0.0.1");
+    assert.equal(config.inbounds[0].port, 10086);
+    assert.equal(config.inbounds[0].streamSettings.security, "none");
+    assert.equal(config.inbounds[0].streamSettings.wsSettings.path, managed.path);
+  } finally {
+    process.env.NOVAPANEL_DEPLOYMENT_MODE = "direct";
+  }
+});

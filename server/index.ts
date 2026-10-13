@@ -363,13 +363,13 @@ async function startEngine(): Promise<Row> {
   engineLogStream = createWriteStream(logPath, { flags: "a" });
   const child = spawn(binary, ["run", "-config", configPath], { stdio: ["ignore", engineLogStream, engineLogStream], env: xrayEnvironment(binary) });
   engineProcess = child;
-  let spawnError: Error | null = null;
-  child.once("error", (error) => { spawnError = error; });
+  const spawnState: { error: Error | null } = { error: null };
+  child.once("error", (error) => { spawnState.error = error; });
   await delay(350);
-  if (spawnError || child.exitCode !== null) {
+  if (spawnState.error || child.exitCode !== null) {
     engineProcess = null;
     engineLogStream.end(); engineLogStream = null;
-    throw new ApiError(500, `Xray exited immediately. Check the engine log. ${spawnError ? spawnError.message : ""}`);
+    throw new ApiError(500, `Xray exited immediately. Check the engine log. ${spawnState.error ? spawnState.error.message : ""}`);
   }
   child.once("exit", () => { if (engineProcess === child) { engineProcess = null; stopTrafficMonitor(); } });
   startTrafficMonitor();

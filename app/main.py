@@ -478,15 +478,22 @@ def create_user(data: UserCreate, _: dict = Depends(get_admin)) -> dict:
 
 @app.post("/api/users/{user_id}/subscription")
 def create_subscription(user_id: str, request: Request, _: dict = Depends(get_admin)) -> dict[str, str]:
+    disable_expired_users()
+    with db() as conn:
+        user = conn.execute("SELECT enabled FROM vpn_users WHERE id = ?", (user_id,)).fetchone()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if not user["enabled"]:
+        raise HTTPException(status_code=409, detail="Enable this user before creating a subscription.")
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     with db() as conn:
         cur = conn.execute(
-            "UPDATE vpn_users SET subscription_token_hash = ? WHERE id = ?",
+            "UPDATE vpn_users SET subscription_token_hash = ? WHERE id = ? AND enabled = 1",
             (token_hash, user_id),
         )
     if cur.rowcount == 0:
-        raise HTTPException(status_code=404, detail="User not found.")
+        raise HTTPException(status_code=409, detail="The user is disabled.")
     base_url = os.getenv("NOVAPANEL_PUBLIC_BASE_URL", "").rstrip("/")
     if not base_url:
         base_url = str(request.base_url).rstrip("/")

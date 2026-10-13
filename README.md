@@ -74,7 +74,7 @@ These modes are intentionally different. Public HTTPS at the panel domain is not
 
 ## Xray integration
 
-In automatic Linux app-host mode, `run-host.sh` downloads the pinned official Xray-core release only if no Xray binary is found, then verifies the archive with a hard-coded SHA-256 digest before installation. Direct mode does not auto-install the engine; install and verify Xray yourself, or set `NOVAPANEL_XRAY_BINARY`.
+In automatic Linux app-host mode, `run-host.sh` attempts to download the pinned official Xray-core release only if no Xray binary is found, then verifies the archive with a hard-coded SHA-256 digest before installation. If that download fails, the dashboard still starts and reports that the engine is unavailable. Direct mode does not auto-install the engine; install and verify Xray yourself, or set `NOVAPANEL_XRAY_BINARY`.
 
 A saved or automatically generated connection is not proof of reachability. DNS, TLS termination, provider WebSocket handling, child-process permissions, resource limits, storage persistence and actual client connectivity must still be verified. The web-host mode relays WebSocket traffic only on the generated private path and does not bypass provider restrictions.
 

@@ -22,7 +22,8 @@ from urllib.parse import urlencode, quote
 from fastapi import Depends, FastAPI, HTTPException, Request
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -854,4 +855,21 @@ def shutdown_cleanup() -> None:
         stop_engine({})
     except Exception:
         pass
+
+
+FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
+if FRONTEND_DIST.is_dir():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def frontend_app(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found.")
+        root = FRONTEND_DIST.resolve()
+        candidate = (root / full_path).resolve()
+        if (candidate == root or root in candidate.parents) and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(root / "index.html")
 

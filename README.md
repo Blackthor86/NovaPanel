@@ -18,7 +18,7 @@ NovaPanel is a compact, single-process Node.js panel with a Blue Knight Gate–s
 
 Recommended runtime: **Node.js 22** (Node.js 20+ is supported).
 
-1. Upload the ZIP from the successful GitHub Actions artifact NovaPanel-blue-knight-lite-preview for this branch, or upload the repository source files and run npm install.
+1. On main, download the ZIP from the successful GitHub Actions artifact NovaPanel-node-deploy. While this feature is still being reviewed in its pull request, use the preview artifact NovaPanel-blue-knight-lite-preview instead. You can also upload the source files and run npm install.
 2. Set the start command to npm start (node index.js).
 3. Ensure the host assigns SERVER_PORT or PORT and exposes that port as the public web/TCP port.
 4. Use persistent writable storage for NOVAPANEL_DATA_DIR so restarts do not change the UUID, subscription token, password or certificate.

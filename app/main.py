@@ -261,9 +261,10 @@ def build_xray_config() -> dict:
         if not cert or not key or not Path(cert).is_file() or not Path(key).is_file():
             raise ValueError(f'TLS certificate and private key are required for "{item["name"]}".')
         clients = [{"id": client["client_uuid"], "email": f'np-{client["id"]}@local'} for client in user_rows]
-        stream: dict = {"network": item["transport"], "security": "tls", "tlsSettings": {"minVersion": "1.2", "alpn": ["h2", "http/1.1"], "certificates": [{"certificateFile": cert, "keyFile": key}]}}
+        method = {"ws": "websocket", "grpc": "grpc", "httpupgrade": "httpupgrade", "xhttp": "xhttp"}[item["transport"]]
+        stream: dict = {"method": method, "security": "tls", "tlsSettings": {"minVersion": "1.2", "alpn": ["h2", "http/1.1"], "certificates": [{"certificateFile": cert, "keyFile": key}]}}
         if item["transport"] == "ws":
-            stream["wsSettings"] = {"path": item["path"], "headers": ({"Host": item["host_header"]} if item["host_header"] else {})}
+            stream["wsSettings"] = {"path": item["path"], "host": item["host_header"] or ""}
         elif item["transport"] == "httpupgrade":
             stream["httpupgradeSettings"] = {"path": item["path"], "host": item["host_header"] or ""}
         elif item["transport"] == "grpc":

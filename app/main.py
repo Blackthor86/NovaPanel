@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -150,7 +150,19 @@ class ConnectionCreate(BaseModel):
         return value
 
 
-app = FastAPI(title="NovaPanel API", description="NovaPanel control API", version=APP_VERSION)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    try:
+        yield
+    finally:
+        _TRAFFIC_MONITOR_STOP.set()
+        try:
+            stop_engine({})
+        except Exception:
+            pass
+
+
+app = FastAPI(title="NovaPanel API", description="NovaPanel control API", version=APP_VERSION, lifespan=lifespan)
 origins = [x.strip() for x in os.getenv("NOVAPANEL_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, session_cookie="novapanel_session", same_site="strict", https_only=COOKIE_SECURE, max_age=12 * 60 * 60)
@@ -847,15 +859,6 @@ def reconcile_engine() -> dict:
         "engine_applied": True,
         "message": "تغییرات ذخیره شد و Xray با تنظیمات جدید راه‌اندازی شد.",
     }
-
-@app.on_event("shutdown")
-def shutdown_cleanup() -> None:
-    _TRAFFIC_MONITOR_STOP.set()
-    try:
-        stop_engine({})
-    except Exception:
-        pass
-
 
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 if FRONTEND_DIST.is_dir():

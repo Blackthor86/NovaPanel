@@ -432,6 +432,7 @@ def host_report(_: dict = Depends(get_admin)) -> HostReport:
 
 @app.get("/api/dashboard")
 def dashboard(_: dict = Depends(get_admin)) -> dict:
+    disable_expired_users()
     with db() as conn:
         users = conn.execute("SELECT COUNT(*) FROM vpn_users").fetchone()[0]
         active_users = conn.execute("SELECT COUNT(*) FROM vpn_users WHERE enabled = 1").fetchone()[0]
@@ -443,6 +444,7 @@ def dashboard(_: dict = Depends(get_admin)) -> dict:
 
 @app.get("/api/users")
 def list_users(_: dict = Depends(get_admin)) -> list[dict]:
+    disable_expired_users()
     with db() as conn:
         rows = conn.execute(
             """SELECT u.*, t.up_bytes, t.down_bytes, t.last_synced_at
@@ -760,4 +762,12 @@ def reconcile_engine() -> dict:
         "engine_applied": True,
         "message": "تغییرات ذخیره شد و Xray با تنظیمات جدید راه‌اندازی شد.",
     }
+
+@app.on_event("shutdown")
+def shutdown_cleanup() -> None:
+    _TRAFFIC_MONITOR_STOP.set()
+    try:
+        stop_engine({})
+    except Exception:
+        pass
 

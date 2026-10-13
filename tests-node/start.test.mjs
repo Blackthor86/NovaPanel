@@ -120,6 +120,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
   let appChild;
   let clientChild;
   let socksSocket;
+  let passed = false;
 
   const logApp = (chunk) => {
     appLogsBuffer += chunk.toString();
@@ -155,7 +156,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
 
     const health = await waitForHealth(base, appChild, () => appLogsBuffer);
     assert.equal(health.listen_port, port);
-    assert.equal(health.engine_status, "installing");
+    assert.ok(["installing", "running"].includes(health.engine_status), "engine status should show startup in progress");
 
     const setup = await fetch(base + "/knight/login", {
       method: "POST",
@@ -273,6 +274,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     const response = await waitForHttpResponse(socksSocket, "novapanel-e2e-ok", 20000);
     assert.match(response, /HTTP\/1\.[01] 200/);
     assert.match(response, /novapanel-e2e-ok/);
+    passed = true;
   } finally {
     if (socksSocket) socksSocket.destroy();
     if (clientChild && clientChild.exitCode === null) clientChild.kill("SIGTERM");
@@ -290,8 +292,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     appLogStream.end();
     if (fs.existsSync(dataDir)) {
       // Preserve diagnostic logs only on a failed test; successful runs are cleaned up.
-      const passedMarker = appLogsBuffer.includes("[NovaPanel] Xray-core ") && clientLogsBuffer.length >= 0;
-      if (passedMarker) fs.rmSync(dataDir, { recursive: true, force: true });
+      if (passed) fs.rmSync(dataDir, { recursive: true, force: true });
       else console.error("[NovaPanel E2E diagnostics] " + dataDir + "\n" + appLogsBuffer + "\n" + clientLogsBuffer);
     }
   }

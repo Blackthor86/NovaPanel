@@ -453,6 +453,8 @@ def get_connection_links(connection_id: str, _: dict = Depends(get_admin)) -> li
     if connection_row is None:
         raise HTTPException(status_code=404, detail="Connection not found.")
     connection = clean_connection(connection_row)
+    if not connection["tls_ready"]:
+        raise HTTPException(status_code=409, detail="TLS certificate and private key files are required before links can be generated.")
     return [{"user": user["name"], "link": client_link(clean_user(user), connection)} for user in user_rows]
 
 

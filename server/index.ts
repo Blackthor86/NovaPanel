@@ -17,7 +17,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import * as unzipper from "unzipper";
 import { z } from "zod";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const VERSION = "0.6.0";
 const AUTO_CONNECTION_ID = "novapanel-platform-ws";
 const PLATFORM_WS_PORT = 10086;

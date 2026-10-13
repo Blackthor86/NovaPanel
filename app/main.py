@@ -500,7 +500,7 @@ def update_user(user_id: str, data: UserUpdate, _: dict = Depends(get_admin)) ->
 
 
 @app.delete("/api/users/{user_id}")
-def delete_user(user_id: str, _: dict = Depends(get_admin)) -> dict[str, bool]:
+def delete_user(user_id: str, _: dict = Depends(get_admin)) -> dict:
     with db() as conn:
         cur = conn.execute("DELETE FROM vpn_users WHERE id = ?", (user_id,))
     if cur.rowcount == 0:
@@ -540,7 +540,7 @@ def update_connection(connection_id: str, data: ConnectionCreate, _: dict = Depe
 
 
 @app.delete("/api/connections/{connection_id}")
-def delete_connection(connection_id: str, _: dict = Depends(get_admin)) -> dict[str, bool]:
+def delete_connection(connection_id: str, _: dict = Depends(get_admin)) -> dict:
     with db() as conn:
         cur = conn.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
     if cur.rowcount == 0:

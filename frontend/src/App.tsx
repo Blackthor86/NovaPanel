@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNo
 import {
   Activity, ArrowLeft, Check, CircleHelp, Command, Copy, Cpu, Database,
   Gauge, Globe2, LayoutDashboard, LockKeyhole, LogOut, Moon, Network,
-  Plus, RefreshCw, Server, Settings2, ShieldCheck, Sun, Trash2, Users, X, Zap
+  Pencil, Plus, RefreshCw, Server, Settings2, ShieldCheck, Sun, Trash2, Users, X, Zap,
+  ToggleLeft, ToggleRight
 } from "lucide-react";
 
 type User = { id: string; name: string; uuid: string; quota_gb: number | null; expires_at: string | null; enabled: boolean; created_at: string; up_bytes: number; down_bytes: number; used_bytes: number; last_synced_at: string | null };
@@ -72,6 +73,8 @@ export default function App() {
   const [filter, setFilter] = useState("");
   const [modal, setModal] = useState<"user" | "connection" | "links" | null>(null);
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [links, setLinks] = useState<{ user: string; link: string }[]>([]);
   const [userName, setUserName] = useState("");
   const [quota, setQuota] = useState("100");
@@ -185,28 +188,88 @@ export default function App() {
     setStats(null);
   }
 
+  function localDateTime(value: string | null) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  function openUserEditor(user: User) {
+    setEditingUser(user);
+    setUserName(user.name);
+    setQuota(user.quota_gb ? String(user.quota_gb) : "");
+    setExpires(localDateTime(user.expires_at));
+    setModal("user");
+  }
+
+  function openConnectionEditor(connection: Connection) {
+    setEditingConnection(connection);
+    setConnectionName(connection.name);
+    setAddress(connection.address);
+    setPort(String(connection.port));
+    setTransport(connection.transport);
+    setPath(connection.path || "/");
+    setServiceName(connection.service_name || "novapanel");
+    setHostHeader(connection.host_header || "");
+    setSni(connection.server_name || "");
+    setCert(connection.certificate_file || "");
+    setPrivateKey(connection.private_key_file || "");
+    setModal("connection");
+  }
+
   async function createUser(event: FormEvent) {
     event.preventDefault();
-    const result = await runAction("/api/users", "POST", {
+    const body = {
       name: userName.trim(),
       quota_gb: quota ? Number(quota) : null,
       expires_at: expires ? new Date(expires).toISOString() : null
-    });
-    if (result) { setModal(null); setUserName(""); setQuota("100"); setExpires(""); }
+    };
+    const result = editingUser
+      ? await runAction("/api/users/" + editingUser.id, "PUT", body)
+      : await runAction("/api/users", "POST", body);
+    if (result) {
+      setModal(null);
+      setEditingUser(null);
+      setUserName("");
+      setQuota("100");
+      setExpires("");
+    }
   }
 
   async function createConnection(event: FormEvent) {
     event.preventDefault();
-    const result = await runAction("/api/connections", "POST", {
+    const body = {
       name: connectionName.trim(), address: address.trim(), port: Number(port),
       transport, path, service_name: serviceName, host_header: hostHeader || null,
-      server_name: sni || null, certificate_file: cert || null, private_key_file: privateKey || null
-    });
+      server_name: sni || null, certificate_file: cert || null, private_key_file: privateKey || null,
+      enabled: editingConnection?.enabled ?? true
+    };
+    const result = editingConnection
+      ? await runAction("/api/connections/" + editingConnection.id, "PUT", body)
+      : await runAction("/api/connections", "POST", body);
     if (result) {
       setModal(null);
+      setEditingConnection(null);
       setConnectionName(""); setAddress(""); setPort("443"); setPath("/ray");
       setHostHeader(""); setSni(""); setCert(""); setPrivateKey("");
+      setTransport("ws"); setServiceName("novapanel");
     }
+  }
+
+  async function toggleUser(user: User) {
+    await runAction("/api/users/" + user.id, "PUT", { enabled: !user.enabled });
+  }
+
+  async function toggleConnection(connection: Connection) {
+    await runAction("/api/connections/" + connection.id, "PUT", {
+      name: connection.name, address: connection.address, port: connection.port,
+      transport: connection.transport, path: connection.path, service_name: connection.service_name,
+      host_header: connection.host_header, server_name: connection.server_name,
+      certificate_file: connection.certificate_file, private_key_file: connection.private_key_file,
+      enabled: !connection.enabled
+    });
   }
 
   async function removeUser(user: User) {
@@ -280,8 +343,8 @@ export default function App() {
       <div className="page-content">
         <div key={page} className="page-view">
           {page === "نمای کلی" && <Overview stats={stats} users={users} connections={connections} host={host} engine={engine} go={setPage} refresh={() => refresh().then(() => toast("وضعیت به‌روزرسانی شد.")).catch(error => toast(error.message, true))} diagnose={() => setPage("عیب‌یابی")}/>}
-          {page === "کاربران" && <section><PageHeading eyebrow="مدیریت دسترسی" title="کاربران" description="کاربران و شناسه‌های دسترسی را مدیریت کن." action={<button className="primary-button" onClick={() => setModal("user")}><Plus size={17}/> کاربر جدید</button>}/><div className="table-panel"><div className="table-toolbar"><div><strong>فهرست کاربران</strong><span>{fa(users.length)} کاربر ثبت‌شده</span></div><span className="toolbar-note"><Database size={15}/> پایگاه دادهٔ محلی</span></div>{visibleUsers.length ? <div className="table-scroll"><table><thead><tr><th>کاربر</th><th>شناسه UUID</th><th>مصرف / سهمیه</th><th>انقضا</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>{visibleUsers.map(user => <tr key={user.id}><td><div className="user-cell"><span className="mini-avatar">{user.name.slice(0, 1).toUpperCase()}</span><strong>{user.name}</strong></div></td><td><button className="copy-code" onClick={() => copy(user.uuid)}><code>{user.uuid.slice(0, 12)}…</code><Copy size={14}/></button></td><td><div className="usage-cell"><div className="usage-head"><strong>{formatBytes(user.used_bytes || 0)}</strong><small>{user.quota_gb ? "از " + fa(user.quota_gb) + " GB" : "بدون سقف"}</small></div>{user.quota_gb && <div className="quota-track"><i style={{ width: Math.min(100, ((user.used_bytes || 0) / (user.quota_gb * 1024 ** 3)) * 100) + "%" }}/></div>}</div></td><td>{formatExpiry(user.expires_at)}</td><td><Pill good={user.enabled}>{user.enabled ? "فعال" : "غیرفعال"}</Pill></td><td><button className="icon-button danger" aria-label="حذف کاربر" onClick={() => removeUser(user)}><Trash2 size={16}/></button></td></tr>)}</tbody></table></div> : <Empty title="کاربری پیدا نشد" text="برای شروع یک کاربر جدید بساز." action={<button className="primary-button" onClick={() => setModal("user")}><Plus size={16}/> ساخت کاربر</button>}/>}</div><p className="subtle-note">مصرف از آمار Xray همگام می‌شود؛ با رسیدن به سهمیه یا انقضا، کاربر در بررسی بعدی غیرفعال می‌شود.</p></section>}
-          {page === "اتصال‌ها" && <section><PageHeading eyebrow="پروفایل‌های اتصال" title="اتصال‌ها" description="پروفایل‌های سرور و روش انتقال را تعریف و مدیریت کن." action={<button className="primary-button" onClick={() => setModal("connection")}><Plus size={17}/> اتصال جدید</button>}/><div className="connection-grid">{visibleConnections.map(connection => <article className="connection-card" key={connection.id}><div className="connection-card-top"><div className="connection-symbol"><Network size={20}/></div><Pill good={connection.enabled}>{connection.enabled ? "فعال" : "غیرفعال"}</Pill><button className="icon-button danger" aria-label="حذف اتصال" onClick={() => removeConnection(connection)}><Trash2 size={16}/></button></div><h3>{connection.name}</h3><p className="connection-address"><Globe2 size={15}/>{connection.address}:{connection.port}</p><div className="connection-tags"><span>{connection.transport.toUpperCase()}</span><span>{connection.path}</span><span className={connection.tls_ready ? "tls-ready" : "tls-missing"}>{connection.tls_ready ? "فایل‌های TLS یافت شد" : "نیازمند گواهی TLS"}</span></div><div className="connection-card-footer"><span>{connection.tls_ready ? "قابل بررسی" : "لینک هنوز آماده نیست"}</span><button className="text-button" onClick={() => showLinks(connection)} disabled={!connection.tls_ready}>لینک کاربران <ArrowLeft size={14}/></button></div></article>)}{visibleConnections.length === 0 && <div className="empty-wide"><Empty title="پروفایلی وجود ندارد" text="اولین پروفایل اتصال را اضافه کن تا در این صفحه نمایش داده شود." action={<button className="primary-button" onClick={() => setModal("connection")}><Plus size={16}/> ساخت اتصال</button>}/></div>}</div></section>}
+          {page === "کاربران" && <section><PageHeading eyebrow="مدیریت دسترسی" title="کاربران" description="کاربران و شناسه‌های دسترسی را مدیریت کن." action={<button className="primary-button" onClick={() => setModal("user")}><Plus size={17}/> کاربر جدید</button>}/><div className="table-panel"><div className="table-toolbar"><div><strong>فهرست کاربران</strong><span>{fa(users.length)} کاربر ثبت‌شده</span></div><span className="toolbar-note"><Database size={15}/> پایگاه دادهٔ محلی</span></div>{visibleUsers.length ? <div className="table-scroll"><table><thead><tr><th>کاربر</th><th>شناسه UUID</th><th>مصرف / سهمیه</th><th>انقضا</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>{visibleUsers.map(user => <tr key={user.id}><td><div className="user-cell"><span className="mini-avatar">{user.name.slice(0, 1).toUpperCase()}</span><strong>{user.name}</strong></div></td><td><button className="copy-code" onClick={() => copy(user.uuid)}><code>{user.uuid.slice(0, 12)}…</code><Copy size={14}/></button></td><td><div className="usage-cell"><div className="usage-head"><strong>{formatBytes(user.used_bytes || 0)}</strong><small>{user.quota_gb ? "از " + fa(user.quota_gb) + " GB" : "بدون سقف"}</small></div>{user.quota_gb && <div className="quota-track"><i style={{ width: Math.min(100, ((user.used_bytes || 0) / (user.quota_gb * 1024 ** 3)) * 100) + "%" }}/></div>}</div></td><td>{formatExpiry(user.expires_at)}</td><td><Pill good={user.enabled}>{user.enabled ? "فعال" : "غیرفعال"}</Pill></td><td><div className="table-actions"><button className="icon-button" title="ویرایش کاربر" aria-label="ویرایش کاربر" onClick={() => openUserEditor(user)}><Pencil size={15}/></button><button className="icon-button" title={user.enabled ? "غیرفعال کردن" : "فعال کردن"} aria-label={user.enabled ? "غیرفعال کردن" : "فعال کردن"} onClick={() => toggleUser(user)}>{user.enabled ? <ToggleRight size={18}/> : <ToggleLeft size={18}/>}</button><button className="icon-button danger" aria-label="حذف کاربر" onClick={() => removeUser(user)}><Trash2 size={16}/></button></div></td></tr>)}</tbody></table></div> : <Empty title="کاربری پیدا نشد" text="برای شروع یک کاربر جدید بساز." action={<button className="primary-button" onClick={() => setModal("user")}><Plus size={16}/> ساخت کاربر</button>}/>}</div><p className="subtle-note">مصرف از آمار Xray همگام می‌شود؛ با رسیدن به سهمیه یا انقضا، کاربر در بررسی بعدی غیرفعال می‌شود.</p></section>}
+          {page === "اتصال‌ها" && <section><PageHeading eyebrow="پروفایل‌های اتصال" title="اتصال‌ها" description="پروفایل‌های سرور و روش انتقال را تعریف و مدیریت کن." action={<button className="primary-button" onClick={() => setModal("connection")}><Plus size={17}/> اتصال جدید</button>}/><div className="connection-grid">{visibleConnections.map(connection => <article className="connection-card" key={connection.id}><div className="connection-card-top"><div className="connection-symbol"><Network size={20}/></div><Pill good={connection.enabled}>{connection.enabled ? "فعال" : "غیرفعال"}</Pill><button className="icon-button" title="ویرایش اتصال" aria-label="ویرایش اتصال" onClick={() => openConnectionEditor(connection)}><Pencil size={15}/></button><button className="icon-button" title={connection.enabled ? "غیرفعال کردن" : "فعال کردن"} aria-label={connection.enabled ? "غیرفعال کردن" : "فعال کردن"} onClick={() => toggleConnection(connection)}>{connection.enabled ? <ToggleRight size={18}/> : <ToggleLeft size={18}/>}</button><button className="icon-button danger" aria-label="حذف اتصال" onClick={() => removeConnection(connection)}><Trash2 size={16}/></button></div><h3>{connection.name}</h3><p className="connection-address"><Globe2 size={15}/>{connection.address}:{connection.port}</p><div className="connection-tags"><span>{connection.transport.toUpperCase()}</span><span>{connection.path}</span><span className={connection.tls_ready ? "tls-ready" : "tls-missing"}>{connection.tls_ready ? "فایل‌های TLS یافت شد" : "نیازمند گواهی TLS"}</span></div><div className="connection-card-footer"><span>{connection.tls_ready ? "قابل بررسی" : "لینک هنوز آماده نیست"}</span><button className="text-button" onClick={() => showLinks(connection)} disabled={!connection.tls_ready}>لینک کاربران <ArrowLeft size={14}/></button></div></article>)}{visibleConnections.length === 0 && <div className="empty-wide"><Empty title="پروفایلی وجود ندارد" text="اولین پروفایل اتصال را اضافه کن تا در این صفحه نمایش داده شود." action={<button className="primary-button" onClick={() => setModal("connection")}><Plus size={16}/> ساخت اتصال</button>}/></div>}</div></section>}
           {page === "محیط اجرا" && <section><PageHeading eyebrow="سلامت زیرساخت" title="محیط اجرا" description="قابلیت‌های شناسایی‌شده و مواردی که هنوز به آزمون بیرونی نیاز دارند." action={<button className="subtle-button" onClick={() => refresh().catch(error => toast(error.message, true))}><RefreshCw size={15}/> بررسی مجدد</button>}/><div className="host-hero"><div className="host-orb"><Cpu size={27}/></div><div className="host-info"><span>سیستم میزبان</span><h2>{host?.platform || "نامشخص"}</h2><p>Python {host?.python_version || "—"}</p><code>{host?.data_directory || ""}</code></div><Pill good={host?.capabilities.xray_binary?.status === "available"}>{host?.capabilities.xray_binary?.status === "available" ? "Xray شناسایی شد" : "Xray شناسایی نشد"}</Pill></div><div className="capability-grid">{Object.entries(host?.capabilities || {}).map(([key, item]) => <div className="capability-card" key={key}><div className="capability-symbol"><Activity size={19}/></div><strong>{({ persistent_storage: "فضای ذخیره‌سازی", separate_processes: "اجرای پردازش", xray_binary: "موتور Xray", inbound_tcp_udp: "دسترسی TCP/UDP" } as Record<string, string>)[key] || key}</strong><p>{item.detail}</p><CapabilityStatus status={item.status}/></div>)}</div><div className="notice-card"><CircleHelp size={19}/><p>اجرای Python یا وجود یک پورت به‌تنهایی پشتیبانی VPN را تضمین نمی‌کند. محدودیت و قوانین میزبان باید جداگانه بررسی شوند.</p></div></section>}
           {page === "عیب‌یابی" && <section><PageHeading eyebrow="ابزارهای عملیاتی" title="عیب‌یابی" description="تنظیمات را اعتبارسنجی کن و وضعیت اجرای موتور را بررسی کن." action={<button className="subtle-button" onClick={async () => { try { const result = await request<{ log: string }>("/api/engine/log"); setLogs(result.log || "هنوز خروجی‌ای ثبت نشده است."); } catch (error) { toast(error instanceof Error ? error.message : "خواندن لاگ ناموفق بود.", true); } }}><RefreshCw size={15}/> تازه‌سازی لاگ</button>}/><div className="diagnostic-grid"><div className="panel diagnostic-card"><div className="diagnostic-icon"><Check size={22}/></div><h3>اعتبارسنجی پیکربندی</h3><p>پیکربندی با باینری نصب‌شده بررسی می‌شود؛ این تست اتصال بیرونی را تضمین نمی‌کند.</p><button className="primary-button" disabled={busy} onClick={() => runAction("/api/engine/config-test")}>اجرای تست</button></div><div className="panel diagnostic-card"><div className="diagnostic-icon"><Cpu size={22}/></div><h3>موتور Xray</h3><p>وضعیت فعلی پردازش تحت مدیریت پنل.</p><div className="engine-state"><i className={engine === "running" ? "online" : ""}/>{engine === "running" ? "در حال اجرا" : "متوقف"}</div><div className="button-row"><button className="primary-button" disabled={busy || engine === "running"} onClick={() => runAction("/api/engine/start")}>اجرا</button><button className="subtle-button" disabled={busy || engine !== "running"} onClick={() => runAction("/api/engine/stop")}>توقف</button></div></div></div><div className="log-panel"><div className="log-header"><strong>خروجی موتور</strong><button className="icon-button" aria-label="کپی لاگ" onClick={() => copy(logs)}><Copy size={15}/></button></div><pre>{logs || "هنوز لاگی ثبت نشده است."}</pre></div></section>}
           {page === "امنیت" && <section><PageHeading eyebrow="حفاظت و دسترسی" title="امنیت" description="وضعیت واقعی چند مورد مهم و چک‌لیست آماده‌سازی سرور."/><div className="security-summary"><div className="security-summary-icon"><ShieldCheck size={28}/></div><div><h2>بررسی قبل از استقرار</h2><p>این چک‌لیست راهنمای سخت‌سازی است، نه تضمین یا گواهی امنیت.</p></div><Pill good={false}>نیازمند بررسی</Pill></div><SecurityRow title="رمز عبور مدیر" detail="حداقل ۱۴ کاراکتر و ذخیره‌سازی PBKDF2." done/><SecurityRow title="کلید نشست پایدار" detail="روی سرور NOVAPANEL_SECRET_KEY تصادفی و ثابت تنظیم کن."/><SecurityRow title="HTTPS و کوکی Secure" detail="پس از فعال کردن HTTPS، NOVAPANEL_COOKIE_SECURE=1 تنظیم شود."/><SecurityRow title="دسترسی مدیریتی" detail="پنل را پشت HTTPS و فایروال قرار بده و دسترسی را محدود کن."/><SecurityRow title="قوانین میزبان" detail="اجازهٔ پروکسی و پورت‌های موردنیاز را از ارائه‌دهنده تأیید کن."/><SecurityRow title="سهمیه و انقضا" detail="فعلاً ثبت می‌شوند و محدودیت خودکار تا زمان پیاده‌سازی حسابداری مصرف اعمال نمی‌شود."/></section>}
@@ -290,9 +353,9 @@ export default function App() {
         <footer className="page-footer"><span><span className="footer-orb"/> NovaPanel · کنترل شفاف زیرساخت</span><span>© 2026 Blackthor86 · AGPL-3.0-or-later</span></footer>
       </div>
     </main>
-    {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null); }}><div className="modal-card animate-rise"><div className="modal-header"><div><span className="eyebrow">NOVAPANEL / MANAGEMENT</span><h2>{modal === "user" ? "ساخت کاربر جدید" : modal === "connection" ? "تعریف اتصال" : "لینک‌های دسترسی"}</h2></div><button className="icon-button" onClick={() => setModal(null)} aria-label="بستن"><X size={19}/></button></div>
-      {modal === "user" && <form className="form-stack" onSubmit={createUser}><label>نام کاربر<input autoFocus required maxLength={80} value={userName} onChange={event => setUserName(event.target.value)} placeholder="مثلاً استفاده شخصی"/></label><label>سهمیه ترافیک (GB)<input type="number" min="1" max="1000000" value={quota} onChange={event => setQuota(event.target.value)}/></label><label>تاریخ انقضا (اختیاری)<input type="datetime-local" value={expires} onChange={event => setExpires(event.target.value)}/></label><p className="form-hint">مصرف از آمار داخلی Xray محاسبه می‌شود؛ برای اعمال سهمیه باید موتور در حال اجرا باشد.</p><button className="primary-button wide" disabled={busy}><Plus size={16}/> ساخت کاربر</button></form>}
-      {modal === "connection" && <form className="form-stack" onSubmit={createConnection}><div className="form-two"><label>نام اتصال<input required maxLength={80} value={connectionName} onChange={event => setConnectionName(event.target.value)} placeholder="مثلاً Edge WS"/></label><label>دامنه یا IP<input required value={address} onChange={event => setAddress(event.target.value)} placeholder="vpn.example.com"/></label></div><div className="form-two"><label>پورت<input type="number" min="1" max="65535" required value={port} onChange={event => setPort(event.target.value)}/></label><label>ترنسپورت<select value={transport} onChange={event => setTransport(event.target.value)}><option value="ws">WebSocket (WS)</option><option value="grpc">gRPC</option><option value="httpupgrade">HTTP Upgrade</option><option value="xhttp">XHTTP</option></select></label></div>{transport === "grpc" ? <label>نام سرویس gRPC<input value={serviceName} onChange={event => setServiceName(event.target.value)}/></label> : <label>مسیر اتصال<input required value={path} onChange={event => setPath(event.target.value)}/></label>}<div className="form-two"><label>SNI (اختیاری)<input value={sni} onChange={event => setSni(event.target.value)} placeholder="vpn.example.com"/></label><label>Host header (اختیاری)<input value={hostHeader} onChange={event => setHostHeader(event.target.value)} placeholder="cdn.example.com"/></label></div><label>مسیر فایل گواهی TLS<input value={cert} onChange={event => setCert(event.target.value)} placeholder="مسیر fullchain.pem"/></label><label>مسیر کلید خصوصی TLS<input value={privateKey} onChange={event => setPrivateKey(event.target.value)} placeholder="مسیر privkey.pem"/></label><p className="form-hint">گواهی معتبر و قابل‌خواندن روی میزبان برای اجرای واقعی لازم است.</p><button className="primary-button wide" disabled={busy}><Plus size={16}/> ذخیرهٔ اتصال</button></form>}
+    {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null); }}><div className="modal-card animate-rise"><div className="modal-header"><div><span className="eyebrow">NOVAPANEL / MANAGEMENT</span><h2>{modal === "user" ? (editingUser ? "ویرایش کاربر" : "ساخت کاربر جدید") : modal === "connection" ? (editingConnection ? "ویرایش اتصال" : "تعریف اتصال") : "لینک‌های دسترسی"}</h2></div><button className="icon-button" onClick={() => setModal(null)} aria-label="بستن"><X size={19}/></button></div>
+      {modal === "user" && <form className="form-stack" onSubmit={createUser}><label>نام کاربر<input autoFocus required maxLength={80} value={userName} onChange={event => setUserName(event.target.value)} placeholder="مثلاً استفاده شخصی"/></label><label>سهمیه ترافیک (GB)<input type="number" min="1" max="1000000" value={quota} onChange={event => setQuota(event.target.value)}/></label><label>تاریخ انقضا (اختیاری)<input type="datetime-local" value={expires} onChange={event => setExpires(event.target.value)}/></label><p className="form-hint">مصرف از آمار داخلی Xray محاسبه می‌شود؛ برای اعمال سهمیه باید موتور در حال اجرا باشد.</p><button className="primary-button wide" disabled={busy}>{editingUser ? "ذخیرهٔ تغییرات" : <><Plus size={16}/> ساخت کاربر</>}</button></form>}
+      {modal === "connection" && <form className="form-stack" onSubmit={createConnection}><div className="form-two"><label>نام اتصال<input required maxLength={80} value={connectionName} onChange={event => setConnectionName(event.target.value)} placeholder="مثلاً Edge WS"/></label><label>دامنه یا IP<input required value={address} onChange={event => setAddress(event.target.value)} placeholder="vpn.example.com"/></label></div><div className="form-two"><label>پورت<input type="number" min="1" max="65535" required value={port} onChange={event => setPort(event.target.value)}/></label><label>ترنسپورت<select value={transport} onChange={event => setTransport(event.target.value)}><option value="ws">WebSocket (WS)</option><option value="grpc">gRPC</option><option value="httpupgrade">HTTP Upgrade</option><option value="xhttp">XHTTP</option></select></label></div>{transport === "grpc" ? <label>نام سرویس gRPC<input value={serviceName} onChange={event => setServiceName(event.target.value)}/></label> : <label>مسیر اتصال<input required value={path} onChange={event => setPath(event.target.value)}/></label>}<div className="form-two"><label>SNI (اختیاری)<input value={sni} onChange={event => setSni(event.target.value)} placeholder="vpn.example.com"/></label><label>Host header (اختیاری)<input value={hostHeader} onChange={event => setHostHeader(event.target.value)} placeholder="cdn.example.com"/></label></div><label>مسیر فایل گواهی TLS<input value={cert} onChange={event => setCert(event.target.value)} placeholder="مسیر fullchain.pem"/></label><label>مسیر کلید خصوصی TLS<input value={privateKey} onChange={event => setPrivateKey(event.target.value)} placeholder="مسیر privkey.pem"/></label><p className="form-hint">گواهی معتبر و قابل‌خواندن روی میزبان برای اجرای واقعی لازم است.</p><button className="primary-button wide" disabled={busy}>{editingConnection ? "ذخیرهٔ تغییرات" : <><Plus size={16}/> ذخیرهٔ اتصال</>}</button></form>}
       {modal === "links" && <div className="links-list">{links.length ? links.map(item => <div className="link-item" key={item.user}><div><strong>{item.user}</strong><code>{item.link}</code></div><button className="subtle-button" onClick={() => copy(item.link)}><Copy size={15}/> کپی</button></div>) : <Empty title="کاربر فعالی وجود ندارد" text="ابتدا کاربر فعال بساز تا لینک دریافت کند."/>}<p className="form-hint">لینک‌ها اطلاعات دسترسی خصوصی‌اند؛ آن‌ها را در مخزن عمومی یا گفت‌وگوی عمومی نفرست.</p></div>}
     </div></div>}
     {notice && <Toast message={notice} error={noticeError}/>}

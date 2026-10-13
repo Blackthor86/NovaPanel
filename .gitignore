@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 node_modules/
+build/
 frontend/dist/
 .DS_Store
 .idea/

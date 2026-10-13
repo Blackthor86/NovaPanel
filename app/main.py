@@ -258,8 +258,8 @@ def engine_binary() -> str | None:
 
 def clean_user(row: sqlite3.Row) -> dict:
     keys = row.keys()
-    up_bytes = int(row["up_bytes"]) if "up_bytes" in keys else 0
-    down_bytes = int(row["down_bytes"]) if "down_bytes" in keys else 0
+    up_bytes = int(row["up_bytes"] or 0) if "up_bytes" in keys else 0
+    down_bytes = int(row["down_bytes"] or 0) if "down_bytes" in keys else 0
     return {
         "id": row["id"],
         "name": row["name"],
@@ -617,19 +617,7 @@ def traffic_monitor(stop_event: threading.Event) -> None:
         if engine_status()["status"] != "running":
             return
         try:
-            disabled = disable_expired_users()
-            if disabled:
-                stop_engine({})
-                try:
-                    start_engine({})
-                except Exception:
-                    with (DATA_DIR / "xray.log").open("a", encoding="utf-8") as log:
-                        log.write("\\n[NovaPanel] Engine restart failed after an account was disabled. Check the configuration.\\n")
-                return
-
-            if not sync_traffic_counters():
-                continue
-
+            sync_traffic_counters()
             disabled = disable_expired_users()
             if disabled:
                 stop_engine({})

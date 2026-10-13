@@ -67,12 +67,38 @@ class UserCreate(BaseModel):
     expires_at: str | None = Field(default=None, max_length=40)
     enabled: bool = True
 
+    @field_validator("expires_at")
+    @classmethod
+    def validate_expiry(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Expiry must be an ISO date and time.") from exc
+        if parsed.tzinfo is None:
+            raise ValueError("Expiry must include a timezone.")
+        return parsed.astimezone(timezone.utc).isoformat()
+
 
 class UserUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     quota_gb: int | None = Field(default=None, ge=1, le=1_000_000)
     expires_at: str | None = Field(default=None, max_length=40)
     enabled: bool | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def validate_expiry(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Expiry must be an ISO date and time.") from exc
+        if parsed.tzinfo is None:
+            raise ValueError("Expiry must include a timezone.")
+        return parsed.astimezone(timezone.utc).isoformat()
 
 
 class ConnectionCreate(BaseModel):
@@ -175,6 +201,12 @@ def init_db() -> None:
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS traffic_usage (
+                user_id TEXT PRIMARY KEY REFERENCES vpn_users(id) ON DELETE CASCADE,
+                up_bytes INTEGER NOT NULL DEFAULT 0,
+                down_bytes INTEGER NOT NULL DEFAULT 0,
+                last_synced_at TEXT
+            );
         """)
 
 
@@ -222,7 +254,22 @@ def engine_binary() -> str | None:
 
 
 def clean_user(row: sqlite3.Row) -> dict:
-    return {"id": row["id"], "name": row["name"], "uuid": row["client_uuid"], "quota_gb": row["quota_gb"], "expires_at": row["expires_at"], "enabled": bool(row["enabled"]), "created_at": row["created_at"]}
+    keys = row.keys()
+    up_bytes = int(row["up_bytes"]) if "up_bytes" in keys else 0
+    down_bytes = int(row["down_bytes"]) if "down_bytes" in keys else 0
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "uuid": row["client_uuid"],
+        "quota_gb": row["quota_gb"],
+        "expires_at": row["expires_at"],
+        "enabled": bool(row["enabled"]),
+        "created_at": row["created_at"],
+        "up_bytes": up_bytes,
+        "down_bytes": down_bytes,
+        "used_bytes": up_bytes + down_bytes,
+        "last_synced_at": row["last_synced_at"] if "last_synced_at" in keys else None,
+    }
 
 
 def clean_connection(row: sqlite3.Row) -> dict:
@@ -241,7 +288,36 @@ def client_link(user: dict, connection: dict) -> str:
     return f'vless://{user["uuid"]}@{connection["address"]}:{connection["port"]}?{urlencode(params)}#{label}'
 
 
+def disable_expired_users() -> list[str]:
+    now = datetime.now(timezone.utc)
+    disabled: list[str] = []
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT u.id, u.quota_gb, u.expires_at,
+                      COALESCE(t.up_bytes, 0) + COALESCE(t.down_bytes, 0) AS used_bytes
+               FROM vpn_users u
+               LEFT JOIN traffic_usage t ON t.user_id = u.id
+               WHERE u.enabled = 1"""
+        ).fetchall()
+        for row in rows:
+            expired = False
+            if row["expires_at"]:
+                try:
+                    expiry = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                    expired = expiry <= now
+                except ValueError:
+                    continue
+            quota_reached = row["quota_gb"] is not None and int(row["used_bytes"]) >= int(row["quota_gb"]) * (1024 ** 3)
+            if expired or quota_reached:
+                conn.execute("UPDATE vpn_users SET enabled = 0 WHERE id = ?", (row["id"],))
+                disabled.append(row["id"])
+    return disabled
+
+
 def build_xray_config() -> dict:
+    disable_expired_users()
     with db() as conn:
         user_rows = conn.execute("SELECT * FROM vpn_users WHERE enabled = 1").fetchall()
         connection_rows = conn.execute("SELECT * FROM connections WHERE enabled = 1 ORDER BY created_at").fetchall()
@@ -269,7 +345,15 @@ def build_xray_config() -> dict:
         elif item["transport"] == "xhttp":
             stream["xhttpSettings"] = {"path": item["path"], "host": item["host_header"] or "", "mode": "auto"}
         inbounds.append({"tag": f'novapanel-{item["id"][:8]}', "listen": "0.0.0.0", "port": item["port"], "protocol": "vless", "settings": {"clients": clients, "decryption": "none"}, "streamSettings": stream, "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]}})
-    return {"log": {"loglevel": "warning"}, "inbounds": inbounds, "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}], "routing": {"rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}]}}
+    return {
+        "log": {"loglevel": "warning"},
+        "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["StatsService"]},
+        "stats": {},
+        "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}},
+        "inbounds": inbounds,
+        "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
+        "routing": {"rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}]},
+    }
 
 
 @app.get("/api/health")
@@ -350,13 +434,18 @@ def dashboard(_: dict = Depends(get_admin)) -> dict:
         active_users = conn.execute("SELECT COUNT(*) FROM vpn_users WHERE enabled = 1").fetchone()[0]
         connections = conn.execute("SELECT COUNT(*) FROM connections").fetchone()[0]
         enabled_connections = conn.execute("SELECT COUNT(*) FROM connections WHERE enabled = 1").fetchone()[0]
-    return {"users_total": users, "users_enabled": active_users, "connections_total": connections, "connections_enabled": enabled_connections, "engine": engine_status()["status"], "version": APP_VERSION}
+        total_bytes = conn.execute("SELECT COALESCE(SUM(up_bytes + down_bytes), 0) FROM traffic_usage").fetchone()[0]
+    return {"users_total": users, "users_enabled": active_users, "connections_total": connections, "connections_enabled": enabled_connections, "total_bytes": int(total_bytes), "engine": engine_status()["status"], "version": APP_VERSION}
 
 
 @app.get("/api/users")
 def list_users(_: dict = Depends(get_admin)) -> list[dict]:
     with db() as conn:
-        rows = conn.execute("SELECT * FROM vpn_users ORDER BY created_at DESC").fetchall()
+        rows = conn.execute(
+            """SELECT u.*, t.up_bytes, t.down_bytes, t.last_synced_at
+               FROM vpn_users u LEFT JOIN traffic_usage t ON t.user_id = u.id
+               ORDER BY u.created_at DESC"""
+        ).fetchall()
     return [clean_user(row) for row in rows]
 
 
@@ -366,7 +455,13 @@ def create_user(data: UserCreate, _: dict = Depends(get_admin)) -> dict:
     client_id = str(uuid.uuid4())
     with db() as conn:
         conn.execute("INSERT INTO vpn_users(id, name, client_uuid, quota_gb, expires_at, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, data.name.strip(), client_id, data.quota_gb, data.expires_at, int(data.enabled), now_iso()))
-        row = conn.execute("SELECT * FROM vpn_users WHERE id = ?", (user_id,)).fetchone()
+        conn.execute("INSERT INTO traffic_usage(user_id) VALUES (?)", (user_id,))
+        row = conn.execute(
+            """SELECT u.*, t.up_bytes, t.down_bytes, t.last_synced_at
+               FROM vpn_users u LEFT JOIN traffic_usage t ON t.user_id = u.id
+               WHERE u.id = ?""",
+            (user_id,),
+        ).fetchone()
     return clean_user(row)
 
 
@@ -388,7 +483,12 @@ def update_user(user_id: str, data: UserUpdate, _: dict = Depends(get_admin)) ->
     values.append(user_id)
     with db() as conn:
         conn.execute(f'UPDATE vpn_users SET {", ".join(parts)} WHERE id = ?', values)
-        row = conn.execute("SELECT * FROM vpn_users WHERE id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            """SELECT u.*, t.up_bytes, t.down_bytes, t.last_synced_at
+               FROM vpn_users u LEFT JOIN traffic_usage t ON t.user_id = u.id
+               WHERE u.id = ?""",
+            (user_id,),
+        ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="User not found.")
     return clean_user(row)

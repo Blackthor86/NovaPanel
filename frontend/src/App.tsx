@@ -171,7 +171,8 @@ export default function App() {
         body: body === undefined ? undefined : JSON.stringify(body)
       });
       await refresh();
-      toast(result.message || "عملیات با موفقیت انجام شد.");
+      const message = result.message || "عملیات با موفقیت انجام شد.";
+      toast(message, result.engine_applied === false && message.includes("Xray شروع نشد"));
       return result;
     } catch (error) {
       toast(error instanceof Error ? error.message : "عملیات ناموفق بود.", true);

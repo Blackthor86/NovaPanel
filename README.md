@@ -8,14 +8,15 @@ NovaPanel is a self-hosted management panel for proxy-engine deployments, built 
 
 - Persian RTL dashboard with a jade and navy theme, responsive layout, and motion effects
 - First-run admin account creation and session-based login
-- User UUID generation and management
+- User UUID generation and management, including traffic totals, quota and expiry enforcement
 - Connection profile management for WS, gRPC, HTTPUpgrade, and XHTTP settings
 - Connection-link export when certificate and private-key paths are present
 - Host capability report that leaves network reachability as unknown until verified externally
 - Xray configuration test and process control, using an installed binary supplied by the operator
+- Local Xray statistics API and automatic collection of per-user uplink/downlink counters
 - Backend tests and GitHub Actions checks
 
-User traffic quotas and expiry dates can be stored as metadata, but automatic traffic accounting and enforcement are not implemented yet. Certificate files being present does not prove the certificate is valid or trusted.
+Xray per-user traffic counters are collected while the engine is running. Usage totals persist locally; quota and expiry checks run on the monitoring cycle and may take about 15 seconds to take effect. Certificate files being present does not prove the certificate is valid or trusted.
 
 ## Tech stack
 

@@ -4,8 +4,8 @@
 
 ## استقرار پیشنهادی
 
-1. به صفحهٔ Pull Request شاخهٔ آزمایشی برو و از تب Checks/Actions اجرای موفق CI را باز کن.
-2. از بخش Artifacts فایل NovaPanel-blue-knight-lite-preview را دانلود کن. ZIP دانلودشده را استخراج کن و محتوای ZIP داخلی را در File Manager هاست قرار بده.
+1. پس از ادغام نسخه روی main، اجرای موفق CI را در GitHub Actions مخزن باز کن و Artifact به نام NovaPanel-node-deploy را دانلود کن. تا وقتی Pull Request هنوز ادغام نشده، برای تست از Artifact با نام NovaPanel-blue-knight-lite-preview استفاده کن.
+2. ZIP دانلودشده را استخراج کن و محتوای آن را در File Manager هاست قرار بده.
 3. مطمئن شو فایل package.json مستقیماً در ریشهٔ پوشهٔ برنامه است.
 4. Runtime را روی Node.js 22 بگذار و فرمان شروع را npm start قرار بده (معادل node index.js).
 5. متغیر SERVER_PORT را همان مقداری بگذار که هاست برای اتصال عمومی اختصاص داده است؛ اگر هاست آن را خودش تزریق می‌کند، آن را تغییر نده. برنامه در صورت وجود SERVER_PORT، همان را به PORT ترجیح می‌دهد.

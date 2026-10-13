@@ -40,7 +40,7 @@ def test_setup_login_and_logout(client):
 
     response = client.post(
         "/api/login",
-        json={"username": "nova_admin", "password": "a-long-and-secure-test-passphrase"},
+        json={"password": "a-long-and-secure-test-passphrase"},
     )
     assert response.status_code == 200
     assert client.get("/api/me").status_code == 200

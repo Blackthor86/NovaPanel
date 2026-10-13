@@ -136,6 +136,11 @@ def test_platform_websocket_mode_creates_a_managed_profile(client, monkeypatch):
     response = client.post("/api/connections", json={"name": "manual", "address": "vpn.example.com", "port": 443})
     assert response.status_code == 409
 
+    sub = client.post("/api/users/" + user.json()["id"] + "/subscription")
+    assert sub.status_code == 200
+    public_host = "https://testserver"
+    assert sub.json()["url"].startswith(public_host + "/api/subscriptions/")
+
 
 def test_direct_mode_remains_available(client, monkeypatch):
     monkeypatch.setenv("NOVAPANEL_DEPLOYMENT_MODE", "direct")

@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 DATA_DIR = Path(os.getenv("NOVAPANEL_DATA_DIR", str(ROOT_DIR / "data"))).expanduser()

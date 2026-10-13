@@ -608,12 +608,15 @@ def delete_connection(connection_id: str, _: dict = Depends(get_admin)) -> dict:
 
 @app.get("/api/connections/{connection_id}/links")
 def get_connection_links(connection_id: str, _: dict = Depends(get_admin)) -> list[dict]:
+    disable_expired_users()
     with db() as conn:
         connection_row = conn.execute("SELECT * FROM connections WHERE id=?", (connection_id,)).fetchone()
         user_rows = conn.execute("SELECT * FROM vpn_users WHERE enabled=1 ORDER BY name").fetchall()
     if connection_row is None:
         raise HTTPException(status_code=404, detail="Connection not found.")
     connection = clean_connection(connection_row)
+    if not connection["enabled"]:
+        raise HTTPException(status_code=409, detail="This connection is disabled.")
     if not connection["tls_ready"]:
         raise HTTPException(status_code=409, detail="TLS certificate and private key files are required before links can be generated.")
     return [{"user": user["name"], "link": client_link(clean_user(user), connection)} for user in user_rows]

@@ -2,7 +2,7 @@
 
 NovaPanel 0.5.0 is a self-hosted management panel for proxy-engine deployments, built around a Python API and a responsive web interface.
 
-**Project status:** active development. The current build includes the dashboard, one-time admin setup, session login, local SQLite storage, user and connection profile management, host capability reporting, and optional Xray process controls when an operator installs and verifies the engine. It has not yet had an independent security review and should not be exposed directly to the public internet.
+**Project status:** active development. The current build includes password-only admin setup/login, local SQLite storage, user and subscription management, two deployment modes, and optional Xray process controls. The automatic WebSocket relay still depends on the target host's policies and must be tested from an actual client. The project has not had an independent security review and should not be exposed directly to the public internet.
 
 ## What is included
 
@@ -74,9 +74,9 @@ These modes are intentionally different. Public HTTPS at the panel domain is not
 
 ## Xray integration
 
-NovaPanel does not download or update Xray automatically. Install a release from a trusted official source, verify it, then set `NOVAPANEL_XRAY_BINARY` to its full path if it is not on PATH. Configure a connection with a valid TLS certificate and matching private key before testing the generated Xray configuration.
+In automatic Linux app-host mode, `run-host.sh` downloads the pinned official Xray-core release only if no Xray binary is found, then verifies the archive with a hard-coded SHA-256 digest before installation. Direct mode does not auto-install the engine; install and verify Xray yourself, or set `NOVAPANEL_XRAY_BINARY`.
 
-A saved connection is not a working connection by itself. DNS, firewall rules, the host provider's network policy, TLS validity, the client configuration, and the actual network path still need to be checked. The single-port web hosting launcher serves the management UI only; it does not multiplex client proxy traffic through the web port.
+A saved or automatically generated connection is not proof of reachability. DNS, TLS termination, provider WebSocket handling, child-process permissions, resource limits, storage persistence and actual client connectivity must still be verified. The web-host mode relays WebSocket traffic only on the generated private path and does not bypass provider restrictions.
 
 ## Configuration and security
 

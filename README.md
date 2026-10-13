@@ -10,7 +10,8 @@ NovaPanel is a self-hosted management panel for proxy-engine deployments, built 
 - First-run admin account creation and session-based login
 - User UUID generation and management, including traffic totals, quota and expiry enforcement
 - Connection profile management for WS, gRPC, HTTPUpgrade, and XHTTP settings
-- Connection-link export when certificate and private-key paths are present
+- Individual VLESS link export when certificate and private-key paths are present
+- Per-user base64 Subscription URL with one-time random token creation and revocation by rotation
 - Host capability report that leaves network reachability as unknown until verified externally
 - Xray configuration test and process control, using an installed binary supplied by the operator
 - Local Xray statistics API and automatic collection of per-user uplink/downlink counters
@@ -46,7 +47,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-The API is available at `http://127.0.0.1:8000`; interactive API docs are at `http://127.0.0.1:8000/docs`.
+The API is available at `http://127.0.0.1:8000`; interactive API docs are at `http://127.0.0.1:8000/docs`. For a public deployment, set `NOVAPANEL_PUBLIC_BASE_URL` to the public HTTPS origin so subscription URLs point to the right address.
 
 ### Frontend
 

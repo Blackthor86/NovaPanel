@@ -672,6 +672,29 @@ async function startRuntime() {
   app.disable("x-powered-by");
   app.set("trust proxy", true);
   app.disable("etag");
+  app.use((req, res, next) => {
+    const pathname = String(req.url || "/").split("?")[0];
+    if (req.httpVersion === "2.0" && mode === "direct" && pathname.startsWith("/" + state.grpcService + "/")) return;
+    if (pathname === state.paths.xhttp || pathname.startsWith(state.paths.xhttp + "/")) {
+      const headers = { ...req.headers, host: "127.0.0.1:" + inbounds.xhttp };
+      delete headers.connection; delete headers["keep-alive"]; delete headers["proxy-connection"];
+      const upstream = http.request({ host: "127.0.0.1", port: inbounds.xhttp, method: req.method, path: req.url, headers, timeout: 0 }, (upstreamResponse) => {
+        const responseHeaders = { ...upstreamResponse.headers };
+        delete responseHeaders.connection; delete responseHeaders["keep-alive"]; delete responseHeaders["transfer-encoding"];
+        res.writeHead(upstreamResponse.statusCode || 502, responseHeaders);
+        upstreamResponse.pipe(res);
+      });
+      upstream.on("error", (error) => {
+        if (!res.headersSent) res.status(502).type("text/plain").send("XHTTP engine unavailable: " + error.message);
+        else res.destroy(error);
+      });
+      req.on("aborted", () => upstream.destroy());
+      res.on("close", () => { if (!res.writableEnded) upstream.destroy(); });
+      req.pipe(upstream);
+      return;
+    }
+    next();
+  });
   app.use(express.urlencoded({ extended: false, limit: "12kb" }));
 
   function persistAuth() { writeJson(persistent.authFile, auth, 0o600); }
@@ -886,17 +909,62 @@ async function startRuntime() {
   httpServer.timeout = 0;
   relayUpgrade(httpServer);
 
-  const httpsServer = https.createServer({
+  const httpsServer = http2.createSecureServer({
     key: certificate.key,
     cert: certificate.cert,
     minVersion: "TLSv1.2",
-    ALPNProtocols: ["http/1.1"]
+    allowHTTP1: true,
+    ALPNProtocols: ["h2", "http/1.1"]
   }, app);
   httpsServer.keepAliveTimeout = 120000;
   httpsServer.headersTimeout = 125000;
   httpsServer.requestTimeout = 0;
   httpsServer.timeout = 0;
   httpsServer.on("tlsClientError", () => { /* invalid TLS handshakes are expected on a shared TCP port */ });
+  httpsServer.on("stream", (stream, headers) => {
+    const requestPath = String(headers[":path"] || "/");
+    if (mode !== "direct" || !requestPath.startsWith("/" + state.grpcService + "/")) return;
+    const session = http2.connect("http://127.0.0.1:" + inbounds.grpc);
+    const forwarded = {
+      ":method": headers[":method"] || "POST",
+      ":path": requestPath,
+      ":scheme": "http",
+      ":authority": "127.0.0.1:" + inbounds.grpc,
+      "content-type": headers["content-type"] || "application/grpc",
+      "te": "trailers"
+    };
+    const blocked = new Set([":authority", ":method", ":path", ":scheme", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "host", "te", "content-type"]);
+    for (const [key, value] of Object.entries(headers)) {
+      if (!key.startsWith(":") && !blocked.has(key.toLowerCase())) forwarded[key.toLowerCase()] = value;
+    }
+    const upstream = session.request(forwarded, { endStream: false });
+    let responseTrailers = null;
+    upstream.on("response", (responseHeaders) => {
+      const outgoing = { ":status": Number(responseHeaders[":status"] || 200) };
+      for (const [key, value] of Object.entries(responseHeaders)) {
+        if (!key.startsWith(":") && !["connection", "transfer-encoding", "keep-alive"].includes(key.toLowerCase())) outgoing[key.toLowerCase()] = value;
+      }
+      try { stream.respond(outgoing, { waitForTrailers: true }); }
+      catch { upstream.close(); session.close(); return; }
+      upstream.pipe(stream);
+    });
+    upstream.on("trailers", (trailers) => { responseTrailers = trailers; });
+    stream.on("wantTrailers", () => {
+      const trailers = {};
+      if (responseTrailers) {
+        for (const [key, value] of Object.entries(responseTrailers)) if (!key.startsWith(":")) trailers[key.toLowerCase()] = value;
+      }
+      if (!trailers["grpc-status"]) trailers["grpc-status"] = "0";
+      try { stream.sendTrailers(trailers); } catch { /* connection already closed */ }
+    });
+    upstream.on("error", () => {
+      try { if (!stream.headersSent) stream.respond({ ":status": 502 }); stream.end(); } catch { /* closed */ }
+      session.close();
+    });
+    stream.on("error", () => { try { upstream.close(); } catch { /* closed */ } });
+    stream.on("close", () => { try { upstream.close(); session.close(); } catch { /* closed */ } });
+    stream.pipe(upstream);
+  });
   relayUpgrade(httpsServer);
 
   await new Promise((resolve, reject) => {

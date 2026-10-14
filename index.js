@@ -388,6 +388,14 @@ function makeSubscriptionLinks(state, host, port, mode, fingerprint, env = proce
     });
     links.push({ name: realityName, type: "VLESS-Reality", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + realityQuery.toString() + "#" + encodeURIComponent(realityName),
       protocol: "vless", transport: "tcp", tls: true, path: "" });
+  } else {
+    const xhttpName = prefix + "VLESS-XHTTP-TLS";
+    const xhttpQuery = new URLSearchParams({
+      encryption: "none", security: "tls", sni: linkHost, fp: String(env.LINK_FP || "chrome"),
+      alpn: "http/1.1", type: "xhttp", path: state.paths.xhttp, mode: "auto", host: plainHost
+    });
+    links.push({ name: xhttpName, type: "VLESS-XHTTP-TLS", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + xhttpQuery.toString() + "#" + encodeURIComponent(xhttpName),
+      protocol: "vless", transport: "xhttp", tls: true, path: state.paths.xhttp });
   }
   return links;
 }
@@ -1307,6 +1315,9 @@ export {
   APP_NAME,
   VERSION,
   buildXrayConfig,
+  buildClashExport,
+  buildSingBoxExport,
+  buildXrayExport,
   createSelfSignedCertificate,
   makeSubscriptionLinks,
   startRuntime

@@ -181,7 +181,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     const subscription = await fetch(status.subscription_url);
     assert.equal(subscription.status, 200);
     const subscriptionLines = Buffer.from(await subscription.text(), "base64").toString("utf8").trim().split(/\r?\n/);
-    assert.equal(subscriptionLines.length, 6);
+    assert.equal(subscriptionLines.length, 13);
     assert.ok(subscriptionLines.some((line) => line.startsWith("vless://") && line.includes("security=tls")));
 
     const clientConfigPath = path.join(dataDir, "xray-client.json");

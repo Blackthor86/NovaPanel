@@ -303,7 +303,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
       const profileConfigPath = path.join(dataDir, "client-" + profileType.replace(/[^a-z0-9]/gi, "-") + ".json");
       const profileLogPath = path.join(dataDir, "client-" + profileType.replace(/[^a-z0-9]/gi, "-") + ".log");
       const clientConfig = {
-        log: { loglevel: "warning", error: profileLogPath },
+        log: { loglevel: "debug", error: profileLogPath },
         inbounds: [{
           listen: "127.0.0.1",
           port: localSocksPort,
@@ -366,7 +366,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
         const serverErrors = readTail(path.join(dataDir, "xray-error.log"), 10000);
         const serverAccess = readTail(path.join(dataDir, "access.log"), 6000);
         const profileLog = readTail(profileLogPath, 8000);
-        throw new Error(profileType + " HTTP response failed: " + error.message + "\nClient stdout/stderr:\n" + clientLogsBuffer + "\nClient Xray log:\n" + profileLog + "\nServer Xray log:\n" + serverLog + "\nServer Xray errors:\n" + serverErrors + "\nServer access log:\n" + serverAccess + "\nRouter logs:\n" + appLogsBuffer);
+        throw new Error(profileType + " HTTP response failed: " + error.message + "\nClient Reality config:\n" + JSON.stringify(clientConfig.outbounds[0].streamSettings) + "\nClient stdout/stderr:\n" + clientLogsBuffer + "\nClient Xray log:\n" + profileLog + "\nServer Xray log:\n" + serverLog + "\nServer Xray errors:\n" + serverErrors + "\nServer access log:\n" + serverAccess + "\nRouter logs:\n" + appLogsBuffer);
       });
       assert.match(payload, /HTTP\/1\.[01] 200/, profileType + " returned non-200 response");
       assert.match(payload, /novapanel-e2e-ok/, profileType + " did not tunnel the response");

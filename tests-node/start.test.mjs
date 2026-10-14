@@ -235,6 +235,7 @@ test("real Xray client traffic for all generated profiles passes through the ass
         NOVAPANEL_AUTO_INSTALL_XRAY: "1",
         NOVAPANEL_LINK_MODE: "direct",
         NOVAPANEL_XRAY_LOGLEVEL: "debug",
+        NOVAPANEL_XRAY_REALITY_SHOW: "1",
         PANEL_PATH: "knight"
       },
       stdio: ["ignore", "pipe", "pipe"]

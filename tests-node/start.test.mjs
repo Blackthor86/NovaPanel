@@ -174,6 +174,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     const status = await waitForEngine(base, cookie, appChild, () => appLogsBuffer);
     assert.equal(status.links.length, 13);
     const state = JSON.parse(fs.readFileSync(path.join(dataDir, "state.json"), "utf8"));
+    assert.equal(state.reality.serverName, "www.cloudflare.com", "new installs must use a Reality target compatible with current Xray TLS limits");
     const profile = status.links.find((link) => link.type === "VLESS-WS-TLS");
     assert.ok(profile, "TLS WebSocket VLESS profile must be generated");
     const uri = new URL(profile.uri);

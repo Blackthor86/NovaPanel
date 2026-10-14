@@ -479,11 +479,15 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
       assert.match(payload, /novapanel-e2e-ok/, profileType + " did not tunnel the response");
     }
 
-    for (const type of ["VLESS-HTTPUpgrade", "VLESS-gRPC-TLS", "VLESS-XHTTP-TLS"]) {
+    for (const type of [
+      "VLESS-WS", "VMess-WS", "VMess-WS-TLS", "Trojan-WS", "Trojan-WS-TLS",
+      "VMess-HTTPUpgrade", "Trojan-HTTPUpgrade", "Shadowsocks-WS",
+      "VLESS-HTTPUpgrade", "VLESS-gRPC-TLS", "VLESS-XHTTP-TLS"
+    ]) {
       await testProfile(type);
     }
-    // Compare Reality directly against the loopback Xray inbound and through
-    // the shared public-port mux to determine which layer drops the handshake.
+    // Verify Reality independently against the loopback inbound and then
+    // through the shared public port; both paths must complete a real request.
     await testProfile("VLESS-Reality", false);
     await testProfile("VLESS-Reality", true);
     passed = true;

@@ -190,7 +190,18 @@ function ensurePersistentState(dataDir) {
     state.reality.publicKey = pair.publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64url");
   }
   if (!state.reality.shortId || !/^[0-9a-f]{8,16}$/i.test(state.reality.shortId)) state.reality.shortId = crypto.randomBytes(8).toString("hex");
-  if (!state.reality.serverName || typeof state.reality.serverName !== "string") state.reality.serverName = String(process.env.NOVAPANEL_REALITY_SNI || "www.microsoft.com").trim().toLowerCase();
+  const configuredRealitySni = String(process.env.NOVAPANEL_REALITY_SNI || "").trim().toLowerCase();
+  if (configuredRealitySni) {
+    state.reality.serverName = configuredRealitySni;
+  } else if (!state.reality.serverName || typeof state.reality.serverName !== "string" ||
+      state.reality.serverName.trim().toLowerCase() === "www.microsoft.com") {
+    // Microsoft Front Door can send an 8273-byte TLS Certificate record,
+    // exceeding the 8192-byte pre-read limit in supported Xray Reality builds.
+    // Migrate the old default while preserving any custom persisted SNI.
+    state.reality.serverName = "www.cloudflare.com";
+  } else {
+    state.reality.serverName = state.reality.serverName.trim().toLowerCase();
+  }
   if (!auth.secret || typeof auth.secret !== "string") auth.secret = crypto.randomBytes(32).toString("base64url");
 
   if (process.env.RESET_PANEL_PASSWORD === "true") {

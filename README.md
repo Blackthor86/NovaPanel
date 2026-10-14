@@ -6,7 +6,7 @@ NovaPanel is a compact, single-process Node.js connection panel designed for hos
 
 - First visit opens the setup page; choose an admin password and no username is required.
  - One TCP listener handles the web panel plus compatible proxy transports. The public listener prefers `PORT`, then `SERVER_PORT`.
-- sing-box is the primary native engine for VLESS, VMess, and Trojan WebSocket/HTTPUpgrade, plus direct-mode gRPC and Reality. Xray-core is used only for XHTTP and Shadowsocks-over-WebSocket. Node.js handles the panel, subscription endpoints, TLS termination, and the one-port traffic router.
+- sing-box is the primary native engine for VLESS, VMess, and Trojan WebSocket/HTTPUpgrade, plus direct-mode gRPC. Xray-core handles XHTTP, Shadowsocks-over-WebSocket, and Reality. Node.js handles the panel, subscription endpoints, TLS termination, and the one-port traffic router.
 - UUID, private subscription token, random transport paths, TLS certificate, and Reality keys are saved under the persistent data directory.
 - One Base64 subscription URL returns the current profile list; a V2Ray-compatible client can update that subscription without copying profiles individually.
 - Profile formats include VLESS, VMess, and Trojan WebSocket; HTTPUpgrade variants; VLESS gRPC TLS and XHTTP; Shadowsocks WebSocket; and VLESS Reality for direct TCP hosts.
@@ -73,7 +73,7 @@ The host must allow native sing-box and (in direct mode) Xray child processes, o
 - The status panel should report \`engine_status: "running"\`.
 - Import the subscription and test real client traffic. API tests alone are not a network-connectivity guarantee.
 
-Run checks locally with \`npm test\`. CI validates generated profiles using real Xray client traffic against a controlled destination, with the primary WS/HTTPUpgrade/gRPC/Reality inbounds served by sing-box and XHTTP/Shadowsocks by Xray. Reality is tested against its loopback inbound and through the shared public TCP port. These tests run on the GitHub runner; raw TCP forwarding and real-world speed on Botkeep or another hosting provider must still be verified on that host.
+Run checks locally with \`npm test\`. CI validates generated profiles using real Xray client traffic against a controlled destination. Sing-box serves the primary WebSocket/HTTPUpgrade/gRPC inbounds; Xray serves XHTTP, Shadowsocks, and Reality. The suite tests these profiles through the shared public TCP port. Tests run on the GitHub runner; raw TCP forwarding and real-world speed on Botkeep or another provider must still be verified on that host.
 
 ## Security and license
 

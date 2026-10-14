@@ -58,7 +58,7 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
   assert.ok(trojanLink.uri.includes("@panel.example.test:443"));
 });
 
-test("primary protocols run on sing-box and Xray is limited to XHTTP and Shadowsocks", () => {
+test("primary protocols run on sing-box while Xray serves XHTTP, Shadowsocks, and Reality", () => {
   const state = {
     uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001", grpcService: "novapanel-test",
     ssMethod: "aes-256-gcm", ssPassword: "test-ss-password",

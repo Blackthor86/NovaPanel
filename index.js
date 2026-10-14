@@ -234,7 +234,11 @@ function normalizePanelPath(value) {
 function normalizeLinkMode(env = process.env) {
   const selected = String(env.NOVAPANEL_LINK_MODE || env.LINK_MODE || "auto").toLowerCase();
   if (selected === "edge" || selected === "direct") return selected;
-  if (env.RAILWAY_PUBLIC_DOMAIN || env.RENDER_EXTERNAL_HOSTNAME || env.REPLIT_DEPLOYMENT) return "edge";
+  if (
+    env.RAILWAY_PROJECT_ID || env.RAILWAY_ENVIRONMENT || env.RAILWAY_SERVICE_ID || env.RAILWAY_PUBLIC_DOMAIN ||
+    env.RENDER_EXTERNAL_HOSTNAME ||
+    env.REPLIT_DEPLOYMENT || env.REPL_ID || env.REPLIT_DOMAINS || env.REPLIT_DEV_DOMAIN
+  ) return "edge";
   return "direct";
 }
 
@@ -395,7 +399,7 @@ function makeSubscriptionLinks(state, host, port, mode, fingerprint, env = proce
     const realityQuery = new URLSearchParams({
       encryption: "none", security: "reality", sni: state.reality.serverName,
       fp: String(env.LINK_FP || "chrome"), pbk: state.reality.publicKey, sid: state.reality.shortId,
-      type: "tcp", headerType: "none"
+      flow: "xtls-rprx-vision", type: "tcp", headerType: "none"
     });
     links.push({ name: realityName, type: "VLESS-Reality", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + realityQuery.toString() + "#" + encodeURIComponent(realityName),
       protocol: "vless", transport: "tcp", tls: true, path: "" });
@@ -425,15 +429,6 @@ function buildSingBoxConfig(state, ports, mode = "direct") {
   add("trojan-httpupgrade-in", "trojan", "trojanHu", { password: state.uuid }, { type: "httpupgrade", path: state.paths.trojanHu });
   if (mode === "direct") {
     add("vless-grpc-in", "vless", "grpc", { uuid: state.uuid }, { type: "grpc", service_name: state.grpcService });
-    inbounds.push({
-      type: "vless", tag: "vless-reality-in", listen: "127.0.0.1", listen_port: ports.reality,
-      users: [{ uuid: state.uuid, flow: "xtls-rprx-vision" }],
-      tls: {
-        enabled: true, server_name: state.reality.serverName, alpn: ["http/1.1"],
-        reality: { enabled: true, handshake: { server: state.reality.serverName, server_port: 443 },
-          private_key: state.reality.privateKey, short_id: [state.reality.shortId] }
-      }
-    });
   }
   return { log: { level: "warn" }, inbounds, outbounds: [{ type: "direct", tag: "direct" }, { type: "block", tag: "blocked" }] };
 }
@@ -451,6 +446,27 @@ function buildXrayConfig(state, ports, dataDir, mode = "direct") {
       tag: "np-shadowsocks-ws", listen: "127.0.0.1", port: ports.ss, protocol: "shadowsocks",
       settings: { method: state.ssMethod, password: state.ssPassword, network: "tcp" },
       streamSettings: { network: "ws", security: "none", wsSettings: { path: state.paths.ss } },
+      sniffing: { enabled: false }
+    });
+    inbounds.push({
+      tag: "np-vless-reality", listen: "127.0.0.1", port: ports.reality,
+      protocol: "vless",
+      settings: {
+        clients: [{ id: state.uuid, email: "np-vless-reality", flow: "xtls-rprx-vision" }],
+        decryption: "none"
+      },
+      streamSettings: {
+        network: "tcp",
+        security: "reality",
+        realitySettings: {
+          show: String(process.env.NOVAPANEL_XRAY_REALITY_SHOW || "").trim() === "1",
+          dest: state.reality.serverName + ":443",
+          xver: 0,
+          serverNames: [state.reality.serverName],
+          privateKey: state.reality.privateKey,
+          shortIds: [state.reality.shortId]
+        }
+      },
       sniffing: { enabled: false }
     });
   }

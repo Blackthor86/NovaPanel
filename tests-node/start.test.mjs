@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { buildXrayExport, makeSubscriptionLinks } from "../index.js";
 
@@ -223,6 +223,17 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     };
     fs.writeFileSync(clientConfigPath, JSON.stringify(clientConfig, null, 2));
     const binary = path.join(dataDir, "bin", "xray");
+    const realityKeyCheck = spawnSync(binary, ["x25519", "-i", state.reality.privateKey], {
+      cwd: dataDir,
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const realityKeyOutput = String(realityKeyCheck.stdout || "") + "\n" + String(realityKeyCheck.stderr || "");
+    assert.equal(realityKeyCheck.status, 0, "Xray could not validate the generated Reality private key: " + realityKeyOutput);
+    const realityPublicKey = realityKeyOutput.match(/Password \(PublicKey\):\s*(\S+)/);
+    assert.ok(realityPublicKey, "Xray did not emit the Reality public key: " + realityKeyOutput);
+    assert.equal(realityPublicKey[1], state.reality.publicKey, "generated Reality keypair does not match Xray's key derivation");
     const validation = spawn(binary, ["run", "-test", "-config", clientConfigPath], {
       cwd: dataDir,
       stdio: ["ignore", "pipe", "pipe"]

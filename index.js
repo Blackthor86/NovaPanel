@@ -1065,6 +1065,11 @@ async function startRuntime() {
   httpServer.requestTimeout = 0;
   httpServer.timeout = 0;
   relayUpgrade(httpServer);
+  await new Promise((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(0, "127.0.0.1", resolve);
+  });
+  const internalHttpPort = httpServer.address().port;
 
   const httpsServer = http2.createSecureServer({
     key: certificate.key,
@@ -1080,7 +1085,39 @@ async function startRuntime() {
   httpsServer.on("tlsClientError", () => { /* invalid TLS handshakes are expected on a shared TCP port */ });
   httpsServer.on("stream", (stream, headers) => {
     const requestPath = String(headers[":path"] || "/");
-    if (mode !== "direct" || !requestPath.startsWith("/" + state.grpcService + "/")) return;
+    const isGrpc = mode === "direct" && requestPath.startsWith("/" + state.grpcService + "/");
+    if (!isGrpc) {
+      const forwarded = {};
+      const hopByHop = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "host", "http2-settings", "upgrade"]);
+      for (const [key, value] of Object.entries(headers)) {
+        if (!key.startsWith(":") && !hopByHop.has(key.toLowerCase())) forwarded[key.toLowerCase()] = value;
+      }
+      forwarded.host = String(headers[":authority"] || "localhost");
+      forwarded["x-forwarded-proto"] = "https";
+      const request = http.request({
+        host: "127.0.0.1",
+        port: internalHttpPort,
+        method: headers[":method"] || "GET",
+        path: requestPath,
+        headers: forwarded,
+        agent: false
+      }, (response) => {
+        const outgoing = { ":status": response.statusCode || 502 };
+        for (const [key, value] of Object.entries(response.headers)) {
+          if (!hopByHop.has(key.toLowerCase()) && value !== undefined) outgoing[key.toLowerCase()] = value;
+        }
+        try { stream.respond(outgoing); } catch { response.destroy(); return; }
+        response.pipe(stream);
+      });
+      request.on("error", () => {
+        try { if (!stream.headersSent) stream.respond({ ":status": 502 }); stream.end(); } catch { /* closed */ }
+      });
+      stream.on("error", () => request.destroy());
+      stream.on("close", () => request.destroy());
+      stream.pipe(request);
+      return;
+    }
+
     const session = http2.connect("http://127.0.0.1:" + inbounds.grpc);
     const forwarded = {
       ":method": headers[":method"] || "POST",
@@ -1280,7 +1317,8 @@ async function startRuntime() {
     }
     await Promise.all([
       new Promise((resolve) => tcpServer.close(() => resolve())),
-      new Promise((resolve) => httpsServer.close(() => resolve()))
+      new Promise((resolve) => httpsServer.close(() => resolve())),
+      new Promise((resolve) => httpServer.close(() => resolve()))
     ]);
   }
 

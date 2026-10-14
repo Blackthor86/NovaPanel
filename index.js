@@ -173,18 +173,23 @@ function ensurePersistentState(dataDir) {
   if (!state.subscriptionToken || typeof state.subscriptionToken !== "string") {
     state.subscriptionToken = crypto.randomBytes(24).toString("base64url");
   }
-  if (!state.paths || typeof state.paths !== "object") {
-    state.paths = {
-      vless: "/connect/vless-" + crypto.randomBytes(10).toString("base64url"),
-      vmess: "/connect/vmess-" + crypto.randomBytes(10).toString("base64url"),
-      trojan: "/connect/trojan-" + crypto.randomBytes(10).toString("base64url")
-    };
-  }
-  for (const kind of ["vless", "vmess", "trojan"]) {
+  if (!state.paths || typeof state.paths !== "object") state.paths = {};
+  for (const kind of ["vless", "vmess", "trojan", "vlessHu", "vmessHu", "trojanHu", "grpc", "xhttp", "ss"]) {
     if (typeof state.paths[kind] !== "string" || !state.paths[kind].startsWith("/")) {
-      state.paths[kind] = "/connect/" + kind + "-" + crypto.randomBytes(10).toString("base64url");
+      state.paths[kind] = "/connect/" + kind.toLowerCase() + "-" + crypto.randomBytes(10).toString("base64url");
     }
   }
+  if (!state.grpcService || typeof state.grpcService !== "string") state.grpcService = "novapanel-" + crypto.randomBytes(4).toString("hex");
+  if (!state.ssMethod || typeof state.ssMethod !== "string") state.ssMethod = "aes-256-gcm";
+  if (!state.ssPassword || typeof state.ssPassword !== "string") state.ssPassword = crypto.randomBytes(18).toString("base64url");
+  if (!state.reality || typeof state.reality !== "object") state.reality = {};
+  if (!state.reality.privateKey || !state.reality.publicKey) {
+    const pair = crypto.generateKeyPairSync("x25519");
+    state.reality.privateKey = pair.privateKey.export({ type: "pkcs8", format: "der" }).subarray(-32).toString("base64url");
+    state.reality.publicKey = pair.publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64url");
+  }
+  if (!state.reality.shortId || !/^[0-9a-f]{8,16}$/i.test(state.reality.shortId)) state.reality.shortId = crypto.randomBytes(8).toString("hex");
+  if (!state.reality.serverName || typeof state.reality.serverName !== "string") state.reality.serverName = String(process.env.NOVAPANEL_REALITY_SNI || "www.microsoft.com").trim().toLowerCase();
   if (!auth.secret || typeof auth.secret !== "string") auth.secret = crypto.randomBytes(32).toString("base64url");
 
   if (process.env.RESET_PANEL_PASSWORD === "true") {
@@ -267,98 +272,148 @@ function formatHostForUri(host) {
 
 function makeSubscriptionLinks(state, host, port, mode, fingerprint, env = process.env) {
   const linkHost = formatHostForUri(cleanHost(host) || "127.0.0.1");
-  const useTlsVariants = mode === "edge" ? [true] : [false, true];
+  const plainHost = linkHost;
+  const edge = mode === "edge";
   const prefix = String(env.NODE_PREFIX || "NovaPanel - ");
-  const variants = [];
-
-  for (const useTls of useTlsVariants) {
-    for (const protocol of [
-      { key: "vless", name: "VLESS-WS", title: "VLESS WebSocket" },
-      { key: "vmess", name: "VMess-WS", title: "VMess WebSocket" },
-      { key: "trojan", name: "Trojan-WS", title: "Trojan WebSocket" }
-    ]) {
-      const tlsSuffix = useTls ? "-TLS" : "";
-      const name = prefix + protocol.name + tlsSuffix;
-      const wsPath = state.paths[protocol.key];
-      const query = new URLSearchParams();
-      if (protocol.key === "vless") query.set("encryption", "none");
-      query.set("security", useTls ? "tls" : "none");
-      if (useTls) {
-        query.set("sni", linkHost);
-        query.set("fp", "chrome");
-        query.set("alpn", "http/1.1");
-        if (mode !== "edge") {
-          query.set("allowInsecure", "1");
-          if (fingerprint) query.set("pcs", fingerprint);
-        }
+  const links = [];
+  const tlsQuery = (query, useTls) => {
+    if (useTls) {
+      query.set("security", "tls");
+      query.set("sni", linkHost);
+      query.set("fp", String(env.LINK_FP || "chrome"));
+      query.set("alpn", "http/1.1");
+      if (!edge) {
+        query.set("allowInsecure", "1");
+        if (fingerprint) query.set("pcs", fingerprint);
       }
-      query.set("type", "ws");
-      query.set("host", linkHost);
-      query.set("path", wsPath);
-
+    } else {
+      query.set("security", "none");
+    }
+  };
+  const wsProtocols = [
+    { key: "vless", protocol: "vless", title: "VLESS-WS" },
+    { key: "vmess", protocol: "vmess", title: "VMess-WS" },
+    { key: "trojan", protocol: "trojan", title: "Trojan-WS" }
+  ];
+  for (const useTls of (edge ? [true] : [false, true])) {
+    for (const item of wsProtocols) {
+      const name = prefix + item.title + (useTls ? "-TLS" : "");
+      const wsPath = state.paths[item.key];
       let uri;
-      if (protocol.key === "vless") {
-        uri = "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + query.toString() + "#" + encodeURIComponent(name);
-      } else if (protocol.key === "trojan") {
-        uri = "trojan://" + state.uuid + "@" + linkHost + ":" + port + "?" + query.toString() + "#" + encodeURIComponent(name);
-      } else {
+      if (item.key === "vmess") {
         const vmess = {
-          v: "2",
-          ps: name,
-          add: linkHost,
-          port: String(port),
-          id: state.uuid,
-          aid: "0",
-          scy: "auto",
-          net: "ws",
-          type: "none",
-          host: linkHost,
-          path: wsPath,
-          tls: useTls ? "tls" : "none"
+          v: "2", ps: name, add: linkHost, port: String(port), id: state.uuid, aid: "0", scy: "auto",
+          net: "ws", type: "none", host: plainHost, path: wsPath, tls: useTls ? "tls" : "none"
         };
         if (useTls) {
-          vmess.sni = linkHost;
-          vmess.fp = "chrome";
-          vmess.alpn = "http/1.1";
-          if (mode !== "edge") {
-            vmess.allowInsecure = true;
-            if (fingerprint) vmess.pcs = fingerprint;
-          }
+          vmess.sni = linkHost; vmess.fp = String(env.LINK_FP || "chrome"); vmess.alpn = "http/1.1";
+          if (!edge) { vmess.allowInsecure = true; if (fingerprint) vmess.pcs = fingerprint; }
         }
         uri = "vmess://" + Buffer.from(JSON.stringify(vmess), "utf8").toString("base64");
+      } else {
+        const query = new URLSearchParams();
+        if (item.key === "vless") query.set("encryption", "none");
+        tlsQuery(query, useTls);
+        query.set("type", "ws"); query.set("host", plainHost); query.set("path", wsPath);
+        uri = item.protocol + "://" + state.uuid + "@" + linkHost + ":" + port + "?" + query.toString() + "#" + encodeURIComponent(name);
       }
-      variants.push({ name, type: protocol.name + tlsSuffix, uri, protocol: protocol.key, tls: useTls, path: wsPath });
+      links.push({ name, type: item.title + (useTls ? "-TLS" : ""), uri, protocol: item.key, transport: "ws", tls: useTls, path: wsPath });
     }
   }
-  return variants;
+
+  const huProtocols = [
+    { key: "vless", protocol: "vless", title: "VLESS-HTTPUpgrade" },
+    { key: "vmess", protocol: "vmess", title: "VMess-HTTPUpgrade" },
+    { key: "trojan", protocol: "trojan", title: "Trojan-HTTPUpgrade" }
+  ];
+  for (const item of huProtocols) {
+    const useTls = edge;
+    const name = prefix + item.title + (useTls ? "-TLS" : "");
+    const pathValue = state.paths[item.key + "Hu"];
+    let uri;
+    const query = new URLSearchParams();
+    if (item.key === "vless") query.set("encryption", "none");
+    tlsQuery(query, useTls);
+    query.set("type", "httpupgrade"); query.set("host", plainHost); query.set("path", pathValue);
+    if (item.key === "vmess") {
+      const vmess = {
+        v: "2", ps: name, add: linkHost, port: String(port), id: state.uuid, aid: "0", scy: "auto",
+        net: "httpupgrade", type: "none", host: plainHost, path: pathValue, tls: useTls ? "tls" : ""
+      };
+      if (useTls) {
+        vmess.sni = linkHost; vmess.fp = String(env.LINK_FP || "chrome"); vmess.alpn = "http/1.1";
+        if (!edge) { vmess.allowInsecure = true; if (fingerprint) vmess.pcs = fingerprint; }
+      }
+      uri = "vmess://" + Buffer.from(JSON.stringify(vmess), "utf8").toString("base64");
+    } else {
+      uri = item.protocol + "://" + state.uuid + "@" + linkHost + ":" + port + "?" + query.toString() + "#" + encodeURIComponent(name);
+    }
+    links.push({ name, type: item.title + (useTls ? "-TLS" : ""), uri, protocol: item.key, transport: "httpupgrade", tls: useTls, path: pathValue });
+  }
+
+  if (!edge) {
+    const grpcName = prefix + "VLESS-gRPC-TLS";
+    const query = new URLSearchParams({
+      encryption: "none", security: "tls", sni: linkHost,
+      fp: String(env.LINK_FP || "chrome"), alpn: "h2", type: "grpc",
+      serviceName: state.grpcService, mode: "gun"
+    });
+    query.set("allowInsecure", "1");
+    if (fingerprint) query.set("pcs", fingerprint);
+    links.push({ name: grpcName, type: "VLESS-gRPC-TLS", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + query.toString() + "#" + encodeURIComponent(grpcName),
+      protocol: "vless", transport: "grpc", tls: true, path: state.grpcService });
+
+    const xhttpName = prefix + "VLESS-XHTTP-TLS";
+    const xhttpQuery = new URLSearchParams({
+      encryption: "none", security: "tls", sni: linkHost, fp: String(env.LINK_FP || "chrome"),
+      alpn: "http/1.1", type: "xhttp", path: state.paths.xhttp, mode: "auto", host: plainHost
+    });
+    xhttpQuery.set("allowInsecure", "1");
+    if (fingerprint) xhttpQuery.set("pcs", fingerprint);
+    links.push({ name: xhttpName, type: "VLESS-XHTTP-TLS", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + xhttpQuery.toString() + "#" + encodeURIComponent(xhttpName),
+      protocol: "vless", transport: "xhttp", tls: true, path: state.paths.xhttp });
+
+    const ssName = prefix + "Shadowsocks-WS";
+    const userInfo = Buffer.from(state.ssMethod + ":" + state.ssPassword, "utf8").toString("base64").replace(/=+$/g, "");
+    const plugin = "v2ray-plugin;mode=websocket;host=" + plainHost + ";path=" + state.paths.ss + ";mux=0";
+    links.push({ name: ssName, type: "Shadowsocks-WS", uri: "ss://" + userInfo + "@" + linkHost + ":" + port + "/?plugin=" + encodeURIComponent(plugin) + "#" + encodeURIComponent(ssName),
+      protocol: "shadowsocks", transport: "ws", tls: false, path: state.paths.ss });
+
+    const realityName = prefix + "VLESS-Reality";
+    const realityQuery = new URLSearchParams({
+      encryption: "none", security: "reality", sni: state.reality.serverName,
+      fp: String(env.LINK_FP || "chrome"), pbk: state.reality.publicKey, sid: state.reality.shortId,
+      type: "tcp", headerType: "none"
+    });
+    links.push({ name: realityName, type: "VLESS-Reality", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + realityQuery.toString() + "#" + encodeURIComponent(realityName),
+      protocol: "vless", transport: "tcp", tls: true, path: "" });
+  }
+  return links;
 }
 
 function buildXrayConfig(state, ports, dataDir) {
   const definitions = [
-    { key: "vless", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "novapanel-vless" }], decryption: "none" } },
-    { key: "vmess", protocol: "vmess", settings: { clients: [{ id: state.uuid, alterId: 0, security: "auto", email: "novapanel-vmess" }] } },
-    { key: "trojan", protocol: "trojan", settings: { clients: [{ password: state.uuid, email: "novapanel-trojan" }] } }
+    { key: "vless", tag: "vless-ws", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-ws" }], decryption: "none" }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.vless } } },
+    { key: "vmess", tag: "vmess-ws", protocol: "vmess", settings: { clients: [{ id: state.uuid, alterId: 0, security: "auto", email: "np-vmess-ws" }] }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.vmess } } },
+    { key: "trojan", tag: "trojan-ws", protocol: "trojan", settings: { clients: [{ password: state.uuid, email: "np-trojan-ws" }] }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.trojan } } },
+    { key: "vlessHu", tag: "vless-httpupgrade", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-hu" }], decryption: "none" }, stream: { network: "httpupgrade", security: "none", httpupgradeSettings: { path: state.paths.vlessHu } } },
+    { key: "vmessHu", tag: "vmess-httpupgrade", protocol: "vmess", settings: { clients: [{ id: state.uuid, alterId: 0, security: "auto", email: "np-vmess-hu" }] }, stream: { network: "httpupgrade", security: "none", httpupgradeSettings: { path: state.paths.vmessHu } } },
+    { key: "trojanHu", tag: "trojan-httpupgrade", protocol: "trojan", settings: { clients: [{ password: state.uuid, email: "np-trojan-hu" }] }, stream: { network: "httpupgrade", security: "none", httpupgradeSettings: { path: state.paths.trojanHu } } },
+    { key: "grpc", tag: "vless-grpc", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-grpc" }], decryption: "none" }, stream: { network: "grpc", security: "none", grpcSettings: { serviceName: state.grpcService, multiMode: false } } },
+    { key: "xhttp", tag: "vless-xhttp", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-xhttp" }], decryption: "none" }, stream: { network: "xhttp", security: "none", xhttpSettings: { path: state.paths.xhttp, host: "", mode: "auto" } } },
+    { key: "ss", tag: "shadowsocks-ws", protocol: "shadowsocks", settings: { method: state.ssMethod, password: state.ssPassword, network: "tcp" }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.ss } } },
+    { key: "reality", tag: "vless-reality", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-reality" }], decryption: "none" }, stream: {
+      network: "tcp", security: "reality",
+      realitySettings: { show: false, dest: state.reality.serverName + ":443", xver: 0, serverNames: [state.reality.serverName], privateKey: state.reality.privateKey, shortIds: [state.reality.shortId] }
+    } }
   ];
   return {
-    log: {
-      loglevel: "warning",
-      access: path.join(dataDir, "access.log"),
-      error: path.join(dataDir, "xray-error.log")
-    },
+    log: { loglevel: "warning", access: path.join(dataDir, "access.log"), error: path.join(dataDir, "xray-error.log") },
     stats: {},
     policy: { levels: { "0": { statsUserUplink: true, statsUserDownlink: true } } },
     inbounds: definitions.map((item) => ({
-      tag: "np-" + item.key,
-      listen: "127.0.0.1",
-      port: ports[item.key],
-      protocol: item.protocol,
-      settings: item.settings,
-      streamSettings: {
-        network: "ws",
-        security: "none",
-        wsSettings: { path: state.paths[item.key] }
-      },
-      sniffing: { enabled: false }
+      tag: "np-" + item.tag, listen: "127.0.0.1", port: ports[item.key],
+      protocol: item.protocol, settings: item.settings, streamSettings: item.stream, sniffing: { enabled: false }
     })),
     outbounds: [{ protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "blocked" }]
   };

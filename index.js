@@ -420,6 +420,131 @@ function buildXrayConfig(state, ports, dataDir) {
   };
 }
 
+
+function makeClientTls(link, host, state, mode, fingerprint) {
+  if (link.type === "VLESS-Reality") {
+    return {
+      enabled: true,
+      server_name: state.reality.serverName,
+      insecure: false,
+      utls: { enabled: true, fingerprint: "chrome" },
+      reality: { enabled: true, public_key: state.reality.publicKey, short_id: state.reality.shortId }
+    };
+  }
+  if (!link.tls) return undefined;
+  const value = { enabled: true, server_name: host, insecure: mode !== "edge", utls: { enabled: true, fingerprint: "chrome" } };
+  if (link.transport === "grpc") value.alpn = ["h2"];
+  else value.alpn = ["http/1.1"];
+  return value;
+}
+
+function makeSingBoxOutbound(link, state, host, port, mode, fingerprint) {
+  const out = { type: link.protocol, tag: link.name, server: host, server_port: Number(port) };
+  if (link.protocol === "vless") { out.uuid = state.uuid; out.packet_encoding = "xudp"; }
+  else if (link.protocol === "vmess") { out.uuid = state.uuid; out.alter_id = 0; out.security = "auto"; }
+  else if (link.protocol === "trojan") out.password = state.uuid;
+  else if (link.protocol === "shadowsocks") { out.method = state.ssMethod; out.password = state.ssPassword; out.plugin = "v2ray-plugin"; out.plugin_opts = "mode=websocket;host=" + host + ";path=" + state.paths.ss + ";mux=0"; }
+  const tls = makeClientTls(link, host, state, mode, fingerprint);
+  if (tls) out.tls = tls;
+  if (link.transport === "ws") out.transport = { type: "ws", path: link.path, headers: { Host: host } };
+  else if (link.transport === "httpupgrade") out.transport = { type: "httpupgrade", path: link.path, host: host };
+  else if (link.transport === "grpc") out.transport = { type: "grpc", service_name: state.grpcService };
+  else if (link.transport === "xhttp") out.transport = { type: "xhttp", path: state.paths.xhttp, host: host, mode: "auto" };
+  return out;
+}
+
+function makeXrayOutbound(link, state, host, port, mode, fingerprint) {
+  let protocol = link.protocol;
+  const out = { tag: link.name, protocol, settings: {} };
+  if (protocol === "vless") out.settings.vnext = [{ address: host, port: Number(port), users: [{ id: state.uuid, encryption: "none" }] }];
+  else if (protocol === "vmess") out.settings.vnext = [{ address: host, port: Number(port), users: [{ id: state.uuid, alterId: 0, security: "auto" }] }];
+  else if (protocol === "trojan") out.settings.servers = [{ address: host, port: Number(port), password: state.uuid }];
+  else if (protocol === "shadowsocks") out.settings.servers = [{ address: host, port: Number(port), method: state.ssMethod, password: state.ssPassword }];
+  const stream = { network: link.transport === "tcp" ? "tcp" : link.transport, security: link.type === "VLESS-Reality" ? "reality" : (link.tls ? "tls" : "none") };
+  if (link.transport === "ws") stream.wsSettings = { path: link.path, headers: { Host: host } };
+  else if (link.transport === "httpupgrade") stream.httpupgradeSettings = { path: link.path, host: host };
+  else if (link.transport === "grpc") stream.grpcSettings = { serviceName: state.grpcService, multiMode: false };
+  else if (link.transport === "xhttp") stream.xhttpSettings = { path: state.paths.xhttp, host: host, mode: "auto" };
+  if (link.type === "VLESS-Reality") {
+    stream.realitySettings = { serverName: state.reality.serverName, fingerprint: "chrome", publicKey: state.reality.publicKey, shortId: state.reality.shortId, spiderX: "/" };
+  } else if (link.tls) {
+    stream.tlsSettings = { serverName: host, alpn: link.transport === "grpc" ? ["h2"] : ["http/1.1"], fingerprint: "chrome" };
+    if (mode !== "edge") {
+      stream.tlsSettings.allowInsecure = true;
+      if (fingerprint) stream.tlsSettings.pinnedPeerCertSha256 = fingerprint;
+    }
+  }
+  out.streamSettings = stream;
+  return out;
+}
+
+function makeClashProxy(link, state, host, port, mode) {
+  const proxy = { name: link.name, type: link.protocol, server: host, port: Number(port) };
+  if (link.protocol === "vless") { proxy.uuid = state.uuid; proxy.encryption = "none"; }
+  else if (link.protocol === "vmess") { proxy.uuid = state.uuid; proxy.alterId = 0; proxy.cipher = "auto"; }
+  else if (link.protocol === "trojan") proxy.password = state.uuid;
+  else if (link.protocol === "shadowsocks") { proxy.cipher = state.ssMethod; proxy.password = state.ssPassword; proxy.plugin = "v2ray-plugin"; proxy["plugin-opts"] = { mode: "websocket", host, path: state.paths.ss, tls: false, mux: false }; return proxy; }
+
+  if (link.type === "VLESS-Reality") {
+    proxy.tls = true; proxy.servername = state.reality.serverName; proxy["client-fingerprint"] = "chrome";
+    proxy["reality-opts"] = { "public-key": state.reality.publicKey, "short-id": state.reality.shortId };
+    proxy["skip-cert-verify"] = false;
+    return proxy;
+  }
+  proxy.network = link.transport === "httpupgrade" ? "ws" : link.transport;
+  if (link.transport === "ws") proxy["ws-opts"] = { path: link.path, headers: { Host: host } };
+  else if (link.transport === "httpupgrade") proxy["ws-opts"] = { path: link.path, headers: { Host: host }, "v2ray-http-upgrade": true };
+  else if (link.transport === "grpc") proxy["grpc-opts"] = { "grpc-service-name": state.grpcService };
+  else if (link.transport === "xhttp") proxy["xhttp-opts"] = { path: state.paths.xhttp, mode: "auto", host: host };
+  if (link.tls) {
+    proxy.tls = true; proxy.servername = host; proxy.alpn = [link.transport === "grpc" ? "h2" : "http/1.1"];
+    proxy["skip-cert-verify"] = mode !== "edge";
+    if (mode === "direct") proxy["client-fingerprint"] = "chrome";
+  } else proxy.tls = false;
+  return proxy;
+}
+
+function buildSingBoxExport(state, links, host, port, mode, fingerprint) {
+  const outbounds = links.map((link) => makeSingBoxOutbound(link, state, host, port, mode, fingerprint));
+  const tags = outbounds.map((outbound) => outbound.tag);
+  return {
+    log: { level: "warn" },
+    inbounds: [{ type: "mixed", tag: "mixed-in", listen: "127.0.0.1", listen_port: 2080 }],
+    outbounds: [{ type: "selector", tag: "select", outbounds: tags.concat(["direct"]) }, { type: "direct", tag: "direct" }, { type: "block", tag: "block" }, ...outbounds],
+    route: { final: "select", auto_detect_interface: true }
+  };
+}
+
+function buildClashExport(state, links, host, port, mode) {
+  const proxies = links.map((link) => makeClashProxy(link, state, host, port, mode));
+  const quote = (value) => JSON.stringify(String(value));
+  const lines = [
+    "mixed-port: 7890", "allow-lan: false", "mode: rule", "log-level: warning", "ipv6: false",
+    "proxies:"
+  ];
+  for (const proxy of proxies) {
+    lines.push("  - name: " + quote(proxy.name));
+    for (const [key, value] of Object.entries(proxy)) {
+      if (key === "name") continue;
+      lines.push("    " + key + ": " + (typeof value === "object" ? JSON.stringify(value) : (typeof value === "string" ? quote(value) : String(value))));
+    }
+  }
+  lines.push("proxy-groups:", "  - name: " + quote("NovaPanel"), "    type: select", "    proxies:");
+  for (const proxy of proxies) lines.push("      - " + quote(proxy.name));
+  lines.push("      - DIRECT", "rules:", "  - MATCH,NovaPanel", "");
+  return lines.join("\n");
+}
+
+function buildXrayExport(state, links, host, port, mode, fingerprint) {
+  const outbounds = links.map((link) => makeXrayOutbound(link, state, host, port, mode, fingerprint));
+  return {
+    log: { loglevel: "warning" },
+    inbounds: [{ listen: "127.0.0.1", port: 10808, protocol: "socks", settings: { auth: "noauth", udp: true }, tag: "socks-in" }],
+    outbounds: [...outbounds, { protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "blocked" }],
+    routing: { rules: [{ type: "field", inboundTag: ["socks-in"], outboundTag: outbounds.length ? outbounds[0].tag : "direct" }] }
+  };
+}
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();

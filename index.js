@@ -733,7 +733,7 @@ function generateLoginPage(panelPath, mode, errorMessage, needsSetupKey) {
 function buildPanelPage(panelPath, status) {
   const rows = status.links.map((link, index) =>
     '<article class="link-row"><div class="link-info"><span class="link-num">' + String(index + 1).padStart(2, "0") +
-    '</span><div><strong>' + htmlEscape(link.name) + '</strong><small>' + htmlEscape(link.tls ? "TLS + WebSocket" : "WebSocket") +
+    '</span><div><strong>' + htmlEscape(link.name) + '</strong><small>' + htmlEscape(link.transport === "ws" ? (link.tls ? "TLS + WebSocket" : "WebSocket") : link.transport === "httpupgrade" ? (link.tls ? "TLS + HTTPUpgrade" : "HTTPUpgrade") : link.transport === "grpc" ? "TLS + gRPC" : link.transport === "xhttp" ? "TLS + XHTTP" : link.transport === "tcp" ? "Reality" : "Shadowsocks WebSocket") +
     '</small></div></div><button class="copy small" data-copy="' + htmlEscape(link.uri) + '">کپی لینک</button></article>'
   ).join("");
   const css = "*,*:before,*:after{box-sizing:border-box}body{margin:0;background:#09101e;color:#e5edf9;font:15px system-ui,Tahoma,Arial;line-height:1.65;padding:20px}.wrap{max-width:900px;margin:0 auto}.bar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:8px 0 24px}.brand{font-size:23px;font-weight:800;letter-spacing:-.5px}.brand span{color:#6ee7b7}.muted{color:#8ea2bf;font-size:13px}.button,a.button,button{border:1px solid #334b68;border-radius:11px;padding:10px 14px;background:#13223a;color:#eaf2ff;text-decoration:none;cursor:pointer;font:inherit}.button.green,button.green{background:#34d399;color:#042b20;border-color:#34d399;font-weight:700}.hero{padding:22px;border-radius:20px;border:1px solid #263c58;background:linear-gradient(130deg,#142541,#101a2d);margin-bottom:16px}.hero h1{font-size:25px;margin:0 0 8px}.status{display:inline-flex;align-items:center;gap:8px;border:1px solid #334b68;background:#0b1527;padding:7px 11px;border-radius:99px;font-size:13px}.dot{width:8px;height:8px;border-radius:100%;background:#fbbf24}.dot.running{background:#34d399}.dot.error{background:#fb7185}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.metric{background:#101a2c;border:1px solid #223653;padding:15px;border-radius:15px}.metric label{display:block;color:#91a5c2;font-size:12px}.metric strong{display:block;margin-top:4px;font-size:17px;overflow-wrap:anywhere}.card{border:1px solid #223653;background:#101a2c;padding:18px;border-radius:17px;margin:14px 0}.card h2{font-size:17px;margin:0 0 7px}.subrow{display:flex;gap:8px;align-items:center}.subrow input{min-width:0;flex:1;direction:ltr;color:#d6e5fc;background:#0a1323;border:1px solid #334b68;border-radius:11px;padding:12px;font:12px ui-monospace,monospace}.link-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #22334c}.link-row:last-child{border:0}.link-info{display:flex;align-items:center;gap:12px}.link-num{color:#6ee7b7;font-size:12px}.link-info strong,.link-info small{display:block}.link-info small{color:#849bb9;font-size:12px}.small{font-size:12px;white-space:nowrap}.warning{background:#3b2b16;border:1px solid #775523;color:#fce7b2;padding:12px;border-radius:12px;margin:12px 0}.errorbox{background:#3e1b29;border:1px solid #7c3748;color:#fecdd3;padding:12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}.foot{color:#788eab;text-align:center;font-size:12px;margin:24px 0}.copy:active{transform:scale(.98)}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}@media(max-width:640px){body{padding:12px}.bar{align-items:flex-start}.brand{font-size:20px}.grid{grid-template-columns:1fr}.subrow{align-items:stretch;flex-direction:column}.subrow input{min-height:44px}.link-row{align-items:flex-start}.link-info{gap:8px}.card,.hero{padding:15px}}";
@@ -755,7 +755,7 @@ function buildPanelPage(panelPath, status) {
     htmlEscape(status.link_mode === "edge" ? "TLS میزبان" : "تک‌پورت مستقیم") + '</strong></div></section><section class="card"><h2>۱. لینک اشتراک اصلی</h2><p class="muted">این لینک را به‌عنوان Subscription اضافه کن؛ آن را جای لینک تکی کانفیگ وارد نکن.</p><div class="subrow"><input id="subscription-url" readonly value="' +
     htmlEscape(status.subscription_url) + '"><button class="copy green" data-copy="' + htmlEscape(status.subscription_url) + '">کپی لینک اشتراک</button></div><div class="actions"><a class="button" href="' +
     htmlEscape(status.subscription_url) + '" target="_blank" rel="noreferrer">بازکردن خروجی اشتراک</a><a class="button" href="/sub?token=' +
-    encodeURIComponent(status.subscription_token) + '" target="_blank" rel="noreferrer">نسخهٔ پایه۶۴</a></div></section><section class="card"><h2>۲. کانفیگ‌های تکی</h2><p class="muted">برای تست سریع می‌توانی یک لینک تکی هم کپی کنی؛ هر شش کانفیگ از همان پورت عمومی استفاده می‌کنند.</p>' +
+    encodeURIComponent(status.subscription_token) + '" target="_blank" rel="noreferrer">نسخهٔ پایه۶۴</a><a class="button" href="/' + panelPath + '/clash?token=' + encodeURIComponent(status.subscription_token) + '" target="_blank" rel="noreferrer">خروجی Clash</a><a class="button" href="/' + panelPath + '/sb?token=' + encodeURIComponent(status.subscription_token) + '" target="_blank" rel="noreferrer">خروجی sing-box</a><a class="button" href="/' + panelPath + '/xray?token=' + encodeURIComponent(status.subscription_token) + '" target="_blank" rel="noreferrer">خروجی Xray</a></div></section><section class="card"><h2>۲. کانفیگ‌های تکی</h2><p class="muted">هر کانفیگ پشتیبانی‌شده از همان پورت عمومی استفاده می‌کند.</p>' +
     rows + '</section><section class="card"><h2>وضعیت موتور اتصال</h2><div id="engine-problem">' + problem + '</div><p class="muted">اگر وضعیت موتور «فعال» نیست، لینک اشتراک ساخته می‌شود ولی تا آماده‌شدن Xray اتصال برقرار نمی‌شود.</p></section><div class="foot">NovaPanel ' +
     VERSION + ' · Node.js تک‌Runtime · پورت عمومی مشترک برای پنل و WebSocket</div></main><script>' +
     'document.addEventListener("click",async function(e){var b=e.target.closest("[data-copy]");if(!b)return;var v=b.getAttribute("data-copy")||"";try{await navigator.clipboard.writeText(v);var old=b.textContent;b.textContent="کپی شد";setTimeout(function(){b.textContent=old},1400)}catch(_){var i=document.createElement("textarea");i.value=v;document.body.appendChild(i);i.select();document.execCommand("copy");i.remove();b.textContent="کپی شد";setTimeout(function(){b.textContent="کپی";},1400)}});' +
@@ -885,19 +885,40 @@ async function startRuntime() {
       res.set("Cache-Control", "no-store");
       return res.status(401).type("text/plain").send("Subscription token is missing or invalid.");
     }
-    const links = getLinks(req).map((link) => link.uri);
-    const raw = links.join("\n") + "\n";
+    const host = getHost(req);
+    const links = getLinks(req);
+    const port = linkPort(process.env, mode, actualPort);
+    const raw = links.map((link) => link.uri).join("\n") + "\n";
     const base64 = Buffer.from(raw, "utf8").toString("base64");
-    const isRaw = req.path.endsWith("/raw") || req.path === "/raw";
+    const pathname = String(req.path || "").toLowerCase();
+    const format = pathname.includes("clash") ? "clash" :
+      pathname.includes("/sb") || pathname === "/sb" ? "sb" :
+      pathname.includes("/xray") ? "xray" :
+      (pathname.endsWith("/raw") || pathname === "/raw" ? "raw" : "base64");
+    let payload = format === "raw" ? raw : base64;
+    let contentType = "text/plain; charset=utf-8";
+    let filename = "NovaPanel.txt";
+    if (format === "clash") {
+      payload = buildClashExport(state, links, host, port, mode);
+      contentType = "text/yaml; charset=utf-8"; filename = "NovaPanel.yaml";
+    } else if (format === "sb") {
+      payload = JSON.stringify(buildSingBoxExport(state, links, host, port, mode, certificate.fingerprint), null, 2);
+      if (pathname.endsWith("/base64")) payload = Buffer.from(payload, "utf8").toString("base64");
+      filename = "NovaPanel-sing-box.json";
+    } else if (format === "xray") {
+      payload = JSON.stringify(buildXrayExport(state, links, host, port, mode, certificate.fingerprint), null, 2);
+      if (pathname.endsWith("/base64")) payload = Buffer.from(payload, "utf8").toString("base64");
+      filename = "NovaPanel-xray.json";
+    }
     res.set({
       "Cache-Control": "no-store, max-age=0",
       Pragma: "no-cache",
-      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Type": contentType,
       "Profile-Update-Interval": "24",
       "Subscription-Userinfo": "upload=0; download=0; total=1099511627776; expire=1893456000",
-      "Content-Disposition": 'inline; filename="NovaPanel.txt"'
+      "Content-Disposition": 'inline; filename="' + filename + '"'
     });
-    return res.send(isRaw ? raw : base64);
+    return res.send(payload);
   }
 
   app.get("/api/health", (_req, res) => {
@@ -975,6 +996,9 @@ async function startRuntime() {
 
   app.get(["/" + panelPath + "/sub", "/" + panelPath + "/base64", "/sub", "/base64"], subscriptionHandler);
   app.get(["/" + panelPath + "/raw", "/raw"], subscriptionHandler);
+  app.get(["/" + panelPath + "/clash", "/" + panelPath + "/clash.yaml", "/clash", "/clash.yaml"], subscriptionHandler);
+  app.get(["/" + panelPath + "/sb", "/" + panelPath + "/sb/raw", "/" + panelPath + "/sb/base64", "/sb"], subscriptionHandler);
+  app.get(["/" + panelPath + "/xray", "/" + panelPath + "/xray/raw", "/" + panelPath + "/xray/base64"], subscriptionHandler);
 
   const errorHandler = (err, _req, res, _next) => {
     console.error("[NovaPanel] HTTP request failed:", err);

@@ -367,7 +367,7 @@ function makeSubscriptionLinks(state, host, port, mode, fingerprint, env = proce
     const xhttpName = prefix + "VLESS-XHTTP-TLS";
     const xhttpQuery = new URLSearchParams({
       encryption: "none", security: "tls", sni: linkHost, fp: String(env.LINK_FP || "chrome"),
-      alpn: "http/1.1", type: "xhttp", path: state.paths.xhttp, mode: "auto", host: plainHost
+      alpn: "h2", type: "xhttp", path: state.paths.xhttp, mode: "auto", host: plainHost
     });
     xhttpQuery.set("allowInsecure", "1");
     if (fingerprint) xhttpQuery.set("pcs", fingerprint);
@@ -392,7 +392,7 @@ function makeSubscriptionLinks(state, host, port, mode, fingerprint, env = proce
     const xhttpName = prefix + "VLESS-XHTTP-TLS";
     const xhttpQuery = new URLSearchParams({
       encryption: "none", security: "tls", sni: linkHost, fp: String(env.LINK_FP || "chrome"),
-      alpn: "http/1.1", type: "xhttp", path: state.paths.xhttp, mode: "auto", host: plainHost
+      alpn: "h2", type: "xhttp", path: state.paths.xhttp, mode: "auto", host: plainHost
     });
     links.push({ name: xhttpName, type: "VLESS-XHTTP-TLS", uri: "vless://" + state.uuid + "@" + linkHost + ":" + port + "?" + xhttpQuery.toString() + "#" + encodeURIComponent(xhttpName),
       protocol: "vless", transport: "xhttp", tls: true, path: state.paths.xhttp });
@@ -441,7 +441,7 @@ function makeClientTls(link, host, state, mode, fingerprint) {
   }
   if (!link.tls) return undefined;
   const value = { enabled: true, server_name: host, insecure: mode !== "edge", utls: { enabled: true, fingerprint: "chrome" } };
-  if (link.transport === "grpc") value.alpn = ["h2"];
+  if (link.transport === "grpc" || link.transport === "xhttp") value.alpn = ["h2"];
   else value.alpn = ["http/1.1"];
   return value;
 }
@@ -476,7 +476,7 @@ function makeXrayOutbound(link, state, host, port, mode, fingerprint) {
   if (link.type === "VLESS-Reality") {
     stream.realitySettings = { serverName: state.reality.serverName, fingerprint: "chrome", publicKey: state.reality.publicKey, shortId: state.reality.shortId, spiderX: "/" };
   } else if (link.tls) {
-    stream.tlsSettings = { serverName: host, alpn: link.transport === "grpc" ? ["h2"] : ["http/1.1"], fingerprint: "chrome" };
+    stream.tlsSettings = { serverName: host, alpn: link.transport === "grpc" || link.transport === "xhttp" ? ["h2"] : ["http/1.1"], fingerprint: "chrome" };
     if (mode !== "edge") {
       if (fingerprint) stream.tlsSettings.pinnedPeerCertSha256 = fingerprint;
       else stream.tlsSettings.allowInsecure = true;
@@ -505,7 +505,7 @@ function makeClashProxy(link, state, host, port, mode) {
   else if (link.transport === "grpc") proxy["grpc-opts"] = { "grpc-service-name": state.grpcService };
   else if (link.transport === "xhttp") proxy["xhttp-opts"] = { path: state.paths.xhttp, mode: "auto", host: host };
   if (link.tls) {
-    proxy.tls = true; proxy.servername = host; proxy.alpn = [link.transport === "grpc" ? "h2" : "http/1.1"];
+    proxy.tls = true; proxy.servername = host; proxy.alpn = [link.transport === "grpc" || link.transport === "xhttp" ? "h2" : "http/1.1"];
     proxy["skip-cert-verify"] = mode !== "edge";
     if (mode === "direct") proxy["client-fingerprint"] = "chrome";
   } else proxy.tls = false;
@@ -1093,7 +1093,9 @@ async function startRuntime() {
   httpsServer.on("stream", (stream, headers) => {
     const requestPath = String(headers[":path"] || "/");
     const isGrpc = mode === "direct" && requestPath.startsWith("/" + state.grpcService + "/");
-    if (!isGrpc) {
+    const isXhttp = mode === "direct" &&
+      (requestPath === state.paths.xhttp || requestPath.startsWith(state.paths.xhttp + "/"));
+    if (!isGrpc && !isXhttp) {
       const forwarded = {};
       const hopByHop = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "host", "http2-settings", "upgrade"]);
       for (const [key, value] of Object.entries(headers)) {
@@ -1125,18 +1127,26 @@ async function startRuntime() {
       return;
     }
 
-    const session = http2.connect("http://127.0.0.1:" + inbounds.grpc);
+    // gRPC and XHTTP use the local Xray HTTP/2 (h2c) listeners directly.
+    // Avoid translating their multiplexed request streams through HTTP/1.1.
+    const localPort = isGrpc ? inbounds.grpc : inbounds.xhttp;
+    const session = http2.connect("http://127.0.0.1:" + localPort);
     const forwarded = {
-      ":method": headers[":method"] || "POST",
+      ":method": headers[":method"] || (isGrpc ? "POST" : "GET"),
       ":path": requestPath,
       ":scheme": "http",
-      ":authority": "127.0.0.1:" + inbounds.grpc,
-      "content-type": headers["content-type"] || "application/grpc",
-      "te": "trailers"
+      ":authority": "127.0.0.1:" + localPort
     };
-    const blocked = new Set([":authority", ":method", ":path", ":scheme", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "host", "te", "content-type"]);
+    const blocked = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "host", "http2-settings", "upgrade"]);
     for (const [key, value] of Object.entries(headers)) {
-      if (!key.startsWith(":") && !blocked.has(key.toLowerCase())) forwarded[key.toLowerCase()] = value;
+      const lower = key.toLowerCase();
+      if (key.startsWith(":") || blocked.has(lower)) continue;
+      if (lower === "te" && value !== "trailers") continue;
+      forwarded[lower] = value;
+    }
+    if (isGrpc) {
+      forwarded["content-type"] = headers["content-type"] || "application/grpc";
+      forwarded.te = "trailers";
     }
     const upstream = session.request(forwarded, { endStream: false });
     let responseTrailers = null;

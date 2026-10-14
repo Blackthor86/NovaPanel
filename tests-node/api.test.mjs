@@ -40,7 +40,7 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
     }
   };
   const links = makeSubscriptionLinks(state, "panel.example.test", 443, "edge", "a".repeat(64), {});
-  assert.equal(links.length, 6);
+  assert.equal(links.length, 13);
   assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan"]);
   const uriLinks = links.filter((link) => link.protocol !== "vmess");
   assert.ok(uriLinks.every((link) => link.uri.includes("@panel.example.test:443")));
@@ -61,6 +61,10 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
 test("Xray configuration builds the complete one-port inbound set on unique loopback ports", () => {
   const state = {
     uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
+    grpcService: "novapanel-test",
+    ssMethod: "aes-256-gcm",
+    ssPassword: "test-ss-password",
+    reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.microsoft.com" },
     paths: {
       vless: "/connect/vless-unit-test",
       vmess: "/connect/vmess-unit-test",

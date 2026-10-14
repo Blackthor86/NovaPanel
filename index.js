@@ -5,6 +5,7 @@ import path from "node:path";
 import net, { isIP } from "node:net";
 import http from "node:http";
 import https from "node:https";
+import http2 from "node:http2";
 import tls from "node:tls";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -12,11 +13,11 @@ import express from "express";
 import * as unzipper from "unzipper";
 
 const APP_NAME = "NovaPanel";
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 const DEFAULT_PANEL_PATH = "knight";
 const SESSION_DAYS = 30;
 const MIN_PASSWORD_LENGTH = 8;
-const USER_AGENT = "NovaPanel/0.7.0";
+const USER_AGENT = "NovaPanel/0.8.0";
 const IS_MAIN = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 function safeEqual(a, b) {
@@ -229,7 +230,7 @@ function normalizeLinkMode(env = process.env) {
 function requestPublicHost(req, state) {
   const fromEnv = cleanHost(process.env.NOVAPANEL_PUBLIC_HOST || process.env.DOMAIN ||
     process.env.FORCE_HOST || process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RENDER_EXTERNAL_HOSTNAME ||
-    process.env.KOYEB_PUBLIC_DOMAIN || "");
+    process.env.KOYEB_PUBLIC_DOMAIN || process.env.BOTKEEP_PUBLIC_HOST || process.env.SERVICE_FQDN || "");
   if (fromEnv) return fromEnv;
   const fromRequest = cleanHost(req && (req.get("x-forwarded-host") || req.get("host")));
   if (fromRequest) {
@@ -531,6 +532,40 @@ function htmlEscape(value) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+function extractClientHelloServerName(buffer) {
+  try {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 9 || buffer[0] !== 0x16 || buffer[5] !== 0x01) return "";
+    let offset = 9;
+    offset += 2 + 32;
+    const sessionLength = buffer[offset++];
+    offset += sessionLength;
+    const cipherLength = buffer.readUInt16BE(offset); offset += 2 + cipherLength;
+    const compressionLength = buffer[offset++]; offset += compressionLength;
+    const extensionsLength = buffer.readUInt16BE(offset); offset += 2;
+    const extensionEnd = Math.min(buffer.length, offset + extensionsLength);
+    while (offset + 4 <= extensionEnd) {
+      const type = buffer.readUInt16BE(offset);
+      const length = buffer.readUInt16BE(offset + 2);
+      offset += 4;
+      if (offset + length > extensionEnd) return "";
+      if (type === 0 && length >= 5) {
+        let p = offset + 2;
+        const end = offset + length;
+        while (p + 3 <= end) {
+          const nameType = buffer[p++];
+          const nameLength = buffer.readUInt16BE(p); p += 2;
+          if (p + nameLength > end) return "";
+          if (nameType === 0) return buffer.subarray(p, p + nameLength).toString("ascii").toLowerCase();
+          p += nameLength;
+        }
+        return "";
+      }
+      offset += length;
+    }
+  } catch { /* incomplete or non-ClientHello input */ }
+  return "";
+}
+
 function parseCookies(req) {
   const result = {};
   for (const part of String(req.headers.cookie || "").split(";")) {
@@ -623,13 +658,11 @@ async function startRuntime() {
   const certificate = ensureCertificate(dataDir, certHost);
   const inbounds = {};
   const reservedPorts = new Set();
-  for (const protocol of ["vless", "vmess", "trojan"]) {
+  for (const kind of ["vless", "vmess", "trojan", "vlessHu", "vmessHu", "trojanHu", "grpc", "xhttp", "ss", "reality"]) {
     let port;
-    do {
-      port = await getFreePort();
-    } while (reservedPorts.has(port));
+    do { port = await getFreePort(); } while (reservedPorts.has(port));
     reservedPorts.add(port);
-    inbounds[protocol] = port;
+    inbounds[kind] = port;
   }
   const xrayConfigPath = path.join(dataDir, "xray.json");
   const xrayLogPath = path.join(dataDir, "xray.log");
@@ -728,6 +761,7 @@ async function startRuntime() {
       listen_port: actualPort,
       engine_status: boot.engine_status,
       xray_installed: Boolean(boot.binary),
+      inbound_count: xrayConfig.inbounds.length,
       link_mode: mode
     });
   });
@@ -801,12 +835,13 @@ async function startRuntime() {
   };
   app.use(errorHandler);
 
+  const upgradeKinds = ["vless", "vmess", "trojan", "vlessHu", "vmessHu", "trojanHu", "ss"];
   function relayUpgrade(server) {
     server.on("upgrade", (req, socket, head) => {
       let pathname;
       try { pathname = new URL(req.url || "/", "http://localhost").pathname; } catch { pathname = ""; }
-      const route = Object.entries(state.paths).find((entry) => entry[1] === pathname);
-      const localPort = route ? inbounds[route[0]] : 0;
+      const route = upgradeKinds.find((kind) => state.paths[kind] === pathname);
+      const localPort = route ? inbounds[route] : 0;
       if (!localPort) {
         socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
         return;
@@ -897,7 +932,8 @@ async function startRuntime() {
         socket.resume();
         return;
       }
-      const upstream = net.connect(internalTlsPort, "127.0.0.1");
+      const upstreamPort = kind === "reality" ? inbounds.reality : internalTlsPort;
+      const upstream = net.connect(upstreamPort, "127.0.0.1");
       upstream.once("connect", () => {
         upstream.write(first);
         socket.pipe(upstream);
@@ -913,7 +949,12 @@ async function startRuntime() {
       first = Buffer.concat([first, chunk]);
       if (first.length < 3) return;
       if (first[0] === 0x16 && first[1] === 0x03) {
-        route("tls");
+        if (first.length < 5) return;
+        const recordLength = first.readUInt16BE(3);
+        if (first.length < recordLength + 5 && first.length < 65540) return;
+        const sni = extractClientHelloServerName(first);
+        if (mode === "direct" && sni && sni.toLowerCase() === String(state.reality.serverName).toLowerCase()) route("reality");
+        else route("tls");
         return;
       }
       const prefix = first.toString("latin1", 0, Math.min(first.length, 16));
@@ -926,8 +967,11 @@ async function startRuntime() {
     socket.on("data", onData);
     timer = setTimeout(() => {
       if (decided) return;
-      if (first.length && first[0] === 0x16 && (first.length < 3 || first[1] === 0x03)) route("tls");
-      else if (/^(GET|POST|PUT|HEAD|OPTIONS|DELETE|PATCH|TRACE|CONNECT) /.test(first.toString("latin1"))) route("http");
+      if (first.length && first[0] === 0x16 && (first.length < 3 || first[1] === 0x03)) {
+        const sni = extractClientHelloServerName(first);
+        if (mode === "direct" && sni && sni.toLowerCase() === String(state.reality.serverName).toLowerCase()) route("reality");
+        else route("tls");
+      } else if (/^(GET|POST|PUT|HEAD|OPTIONS|DELETE|PATCH|TRACE|CONNECT) /.test(first.toString("latin1"))) route("http");
       else fail();
     }, 1500);
     timer.unref();

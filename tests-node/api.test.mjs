@@ -37,7 +37,7 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
   };
   const links = makeSubscriptionLinks(state, "panel.example.test", 443, "edge", "a".repeat(64), {});
   assert.equal(links.length, 6);
-  assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan"]);
+  assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan"]);
   const uriLinks = links.filter((link) => link.protocol !== "vmess");
   assert.ok(uriLinks.every((link) => link.uri.includes("@panel.example.test:443")));
   assert.ok(links.every((link) => link.uri.includes("security=tls") || link.protocol === "vmess"));
@@ -54,7 +54,7 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
   assert.ok(trojanLink.uri.includes("@panel.example.test:443"));
 });
 
-test("Xray configuration has all three WebSocket inbounds on unique loopback ports", () => {
+test("Xray configuration builds the complete one-port inbound set on unique loopback ports", () => {
   const state = {
     uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
     paths: {
@@ -69,12 +69,12 @@ test("Xray configuration has all three WebSocket inbounds on unique loopback por
       ss: "/connect/ss-unit-test"
     }
   };
-  const config = buildXrayConfig(state, { vless: 22001, vmess: 22002, trojan: 22003 }, "/tmp/novapanel-test");
+  const config = buildXrayConfig(state, { vless: 22001, vmess: 22002, trojan: 22003, vlessHu: 22004, vmessHu: 22005, trojanHu: 22006, grpc: 22007, xhttp: 22008, ss: 22009, reality: 22010 }, "/tmp/novapanel-test");
   assert.equal(config.inbounds.length, 10);
   assert.deepEqual(config.inbounds.map((item) => item.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan", "vless", "vless", "shadowsocks", "vless"]);
-  assert.deepEqual(config.inbounds.map((item) => item.port), [22001, 22002, 22003, undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+  assert.deepEqual(config.inbounds.map((item) => item.port), [22001, 22002, 22003, 22004, 22005, 22006, 22007, 22008, 22009, 22010]);
   assert.ok(config.inbounds.every((item) => item.listen === "127.0.0.1"));
-  assert.ok(config.inbounds.every((item) => item.streamSettings.network === "ws"));
+  assert.deepEqual(config.inbounds.map((item) => item.streamSettings.network), ["ws", "ws", "ws", "httpupgrade", "httpupgrade", "httpupgrade", "grpc", "xhttp", "ws", "tcp"]);
   assert.deepEqual(config.inbounds.slice(0, 3).map((item) => item.streamSettings.wsSettings.path), [state.paths.vless, state.paths.vmess, state.paths.trojan]);
 });
 
@@ -138,7 +138,7 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
     assert.equal(statusRes.status, 200);
     const status = await statusRes.json();
     assert.equal(status.engine_status, "disabled");
-    assert.equal(status.links.length, 6);
+    assert.equal(status.links.length, 13);
     assert.equal(status.public_host, "127.0.0.1");
     assert.equal(status.link_port, port);
     assert.match(status.subscription_url, /\/knight\/sub\?token=/);

@@ -417,7 +417,7 @@ function buildXrayConfig(state, ports, dataDir) {
     } }
   ];
   return {
-    log: { loglevel: "warning", access: path.join(dataDir, "access.log"), error: path.join(dataDir, "xray-error.log") },
+    log: { loglevel: ["debug", "info", "warning", "error", "none"].includes(String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "warning").toLowerCase()) ? String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "warning").toLowerCase() : "warning", access: path.join(dataDir, "access.log"), error: path.join(dataDir, "xray-error.log") },
     stats: {},
     policy: { levels: { "0": { statsUserUplink: true, statsUserDownlink: true } } },
     inbounds: definitions.map((item) => ({

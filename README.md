@@ -6,7 +6,7 @@ NovaPanel is a compact, single-process Node.js connection panel designed for hos
 
 - First visit opens the setup page; choose an admin password and no username is required.
 - One TCP listener handles the web panel plus compatible proxy transports. The public listener prefers \`SERVER_PORT\`, then \`PORT\`.
-- Xray-core is downloaded on Linux when enabled and runs as a native child process. Node.js handles the panel, subscription endpoints, and the one-port traffic router.
+- sing-box is the primary native engine for VLESS, VMess, and Trojan WebSocket/HTTPUpgrade, plus direct-mode gRPC and Reality. Xray-core is used only for XHTTP and Shadowsocks-over-WebSocket. Node.js handles the panel, subscription endpoints, TLS termination, and the one-port traffic router.
 - UUID, private subscription token, random transport paths, TLS certificate, and Reality keys are saved under the persistent data directory.
 - One Base64 subscription URL returns the current profile list; a V2Ray-compatible client can update that subscription without copying profiles individually.
 - Profile formats include VLESS, VMess, and Trojan WebSocket; HTTPUpgrade variants; VLESS gRPC TLS and XHTTP; Shadowsocks WebSocket; and VLESS Reality for direct TCP hosts.
@@ -21,7 +21,7 @@ npm install
 npm start
 \`\`\`
 
-Set the host's start command to \`npm start\`. Let the platform inject \`SERVER_PORT\` where possible. Set \`NOVAPANEL_DATA_DIR\` to a writable persistent volume, and keep that folder between restarts. If Xray automatic installation is enabled, the web panel starts while the native engine downloads and starts; wait until the engine status shows **running** before testing a proxy connection.
+Set the host's start command to \`npm start\`. Let the platform inject \`SERVER_PORT\` where possible. Set \`NOVAPANEL_DATA_DIR\` to a writable persistent volume, and keep that folder between restarts. If automatic engine installation is enabled, the panel starts while sing-box (and, in direct mode, Xray for XHTTP/Shadowsocks) downloads and starts. Wait until the engine status shows **running** before testing a proxy connection.
 
 Open \`/knight/login\` on the app's public web URL and set the initial password. After login, copy the **subscription URL**, add it in the client's Subscription section, and use Update/Refresh. Do not use an individual \`vless://\` link as the subscription URL.
 
@@ -43,7 +43,7 @@ The standard subscription URL is shown in the panel. Treat it as a secret: anyon
 
 By default, NovaPanel generates direct links for a host that exposes the app's assigned raw TCP port. Direct TLS uses a self-signed certificate; generated links include its pin and client-side compatibility option. Use \`NOVAPANEL_LINK_MODE=edge\` only when the hosting provider terminates HTTPS and supports WebSocket upgrades through its public domain. Edge mode cannot provide raw-TCP Reality, gRPC, or Shadowsocks profiles.
 
-The host must allow the Xray child process, outbound downloads when automatic installation is enabled, and traffic forwarding on its assigned port. A successful health endpoint does not prove that a proxy client can connect. Confirm the engine is running and test the subscription with a real client on the target host before sharing it.
+The host must allow native sing-box and (in direct mode) Xray child processes, outbound downloads when automatic installation is enabled, and traffic forwarding on its assigned port. A successful health endpoint does not prove that a proxy client can connect. Confirm the engine is running and test the subscription with a real client on the target host before sharing it.
 
 ## Environment variables
 
@@ -55,8 +55,12 @@ The host must allow the Xray child process, outbound downloads when automatic in
 | \`NOVAPANEL_PUBLIC_BASE_URL\` | Optional public subscription base URL |
 | \`NOVAPANEL_LINK_MODE\` | \`direct\` or \`edge\` (default is automatic detection of common edge hosts, otherwise direct) |
 | \`NOVAPANEL_LINK_PORT\` | Optional port placed in connection links |
-| \`NOVAPANEL_AUTO_INSTALL_XRAY\` | \`1\` enables automatic Xray installation; \`0\` disables it |
-| \`NOVAPANEL_XRAY_BINARY\` | Optional path to an existing Xray executable |
+| `NOVAPANEL_AUTO_INSTALL_ENGINES` | `1` enables automatic engine installation; `0` disables it (default: `1`) |
+| `NOVAPANEL_SINGBOX_BINARY` | Optional path to an existing sing-box executable |
+| `NOVAPANEL_SINGBOX_VERSION` | sing-box release version; default `1.11.15`, matching the BlueKnight baseline |
+| `NOVAPANEL_SINGBOX_URL` | Optional override URL for the sing-box archive |
+| `NOVAPANEL_XRAY_BINARY` | Optional path to an existing Xray executable |
+| `NOVAPANEL_AUTO_INSTALL_XRAY` | Legacy alias for the all-engine install switch |
 | \`NOVAPANEL_REALITY_SNI\` | Optional Reality SNI/target; defaults to \`www.cloudflare.com\`. Custom targets should support TLS 1.3 and HTTP/2. |
 | \`PANEL_PASSWORD\` | Optional admin password set through a hosting secret |
 | \`SETUP_KEY\` | Optional extra key for first-time password setup |
@@ -69,7 +73,7 @@ The host must allow the Xray child process, outbound downloads when automatic in
 - The status panel should report \`engine_status: "running"\`.
 - Import the subscription and test real client traffic. API tests alone are not a network-connectivity guarantee.
 
-Run checks locally with \`npm test\`. CI validates all 13 generated profiles using real Xray clients against a controlled destination, including Reality directly against its loopback inbound and through the shared public TCP port. These tests run on the GitHub runner; network connectivity and raw TCP forwarding on Botkeep or another hosting provider must still be verified on that host.
+Run checks locally with \`npm test\`. CI validates generated profiles using real Xray client traffic against a controlled destination, with the primary WS/HTTPUpgrade/gRPC/Reality inbounds served by sing-box and XHTTP/Shadowsocks by Xray. Reality is tested against its loopback inbound and through the shared public TCP port. These tests run on the GitHub runner; raw TCP forwarding and real-world speed on Botkeep or another hosting provider must still be verified on that host.
 
 ## Security and license
 

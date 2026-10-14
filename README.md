@@ -57,6 +57,7 @@ The host must allow the Xray child process, outbound downloads when automatic in
 | \`NOVAPANEL_LINK_PORT\` | Optional port placed in connection links |
 | \`NOVAPANEL_AUTO_INSTALL_XRAY\` | \`1\` enables automatic Xray installation; \`0\` disables it |
 | \`NOVAPANEL_XRAY_BINARY\` | Optional path to an existing Xray executable |
+| \`NOVAPANEL_REALITY_SNI\` | Optional Reality SNI/target; defaults to \`www.cloudflare.com\`. Custom targets should support TLS 1.3 and HTTP/2. |
 | \`PANEL_PASSWORD\` | Optional admin password set through a hosting secret |
 | \`SETUP_KEY\` | Optional extra key for first-time password setup |
 | \`SUB_TOKEN\` | Optional stable subscription token |
@@ -68,7 +69,7 @@ The host must allow the Xray child process, outbound downloads when automatic in
 - The status panel should report \`engine_status: "running"\`.
 - Import the subscription and test real client traffic. API tests alone are not a network-connectivity guarantee.
 
-Run checks locally with \`npm test\`. The CI integration test starts Xray and verifies a VLESS-over-TLS-WebSocket tunnel over the same public TCP port.
+Run checks locally with \`npm test\`. CI validates all 13 generated profiles using real Xray clients against a controlled destination, including Reality directly against its loopback inbound and through the shared public TCP port. These tests run on the GitHub runner; network connectivity and raw TCP forwarding on Botkeep or another hosting provider must still be verified on that host.
 
 ## Security and license
 

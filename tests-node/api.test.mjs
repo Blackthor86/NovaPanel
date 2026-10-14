@@ -87,7 +87,7 @@ test("primary protocols run on sing-box and Xray is limited to XHTTP and Shadows
   assert.equal(buildXrayConfig(state, ports, "/tmp/novapanel-test", "edge").inbounds.length, 0);
 });
 
-test("standalone start binds SERVER_PORT, allows first-use password setup, and serves a usable base64 subscription", async () => {
+test("standalone start prefers PORT over SERVER_PORT, allows first-use password setup, and serves a usable base64 subscription", async () => {
   const root = path.resolve(".");
   const port = await freePort();
   const wrongPort = port === 65535 ? port - 1000 : port + 1;
@@ -96,8 +96,8 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
     cwd: root,
     env: {
       ...process.env,
-      SERVER_PORT: String(port),
-      PORT: String(wrongPort),
+      SERVER_PORT: String(wrongPort),
+      PORT: String(port),
       NOVAPANEL_DATA_DIR: dataDir,
       NOVAPANEL_PUBLIC_HOST: "127.0.0.1",
       NOVAPANEL_AUTO_INSTALL_XRAY: "0",

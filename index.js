@@ -1232,7 +1232,12 @@ async function startRuntime() {
         const recordLength = first.readUInt16BE(3);
         if (first.length < recordLength + 5 && first.length < 65540) return;
         const sni = extractClientHelloServerName(first);
-        if (mode === "direct" && sni && sni.toLowerCase() === String(state.reality.serverName).toLowerCase()) route("reality");
+        const useReality = mode === "direct" && sni && sni.toLowerCase() === String(state.reality.serverName).toLowerCase();
+        if (String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "").toLowerCase() === "debug") {
+          console.log("[NovaPanel] TLS mux route: SNI=" + (sni || "(none)") +
+            ", expected Reality SNI=" + state.reality.serverName + ", route=" + (useReality ? "reality" : "tls") + ".");
+        }
+        if (useReality) route("reality");
         else route("tls");
         return;
       }
@@ -1248,7 +1253,12 @@ async function startRuntime() {
       if (decided) return;
       if (first.length && first[0] === 0x16 && (first.length < 3 || first[1] === 0x03)) {
         const sni = extractClientHelloServerName(first);
-        if (mode === "direct" && sni && sni.toLowerCase() === String(state.reality.serverName).toLowerCase()) route("reality");
+        const useReality = mode === "direct" && sni && sni.toLowerCase() === String(state.reality.serverName).toLowerCase();
+        if (String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "").toLowerCase() === "debug") {
+          console.log("[NovaPanel] TLS mux route: SNI=" + (sni || "(none)") +
+            ", expected Reality SNI=" + state.reality.serverName + ", route=" + (useReality ? "reality" : "tls") + ".");
+        }
+        if (useReality) route("reality");
         else route("tls");
       } else if (/^(GET|POST|PUT|HEAD|OPTIONS|DELETE|PATCH|TRACE|CONNECT) /.test(first.toString("latin1"))) route("http");
       else fail();

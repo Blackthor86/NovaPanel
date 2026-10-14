@@ -359,7 +359,11 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
       const reply = await readExactly(socksSocket, 10, 25000);
       assert.equal(reply[1], 0x00, profileType + " could not reach target: " + clientLogsBuffer + "\n" + appLogsBuffer);
       socksSocket.write("GET /" + encodeURIComponent(profileType) + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
-      const payload = await waitForHttpResponse(socksSocket, "novapanel-e2e-ok", 25000);
+      const payload = await waitForHttpResponse(socksSocket, "novapanel-e2e-ok", 25000).catch((error) => {
+        const serverLog = fs.existsSync(path.join(dataDir, "xray.log")) ? fs.readFileSync(path.join(dataDir, "xray.log"), "utf8").slice(-12000) : "(no xray.log)";
+        const profileLog = fs.existsSync(profileLogPath) ? fs.readFileSync(profileLogPath, "utf8").slice(-8000) : "(no profile log)";
+        throw new Error(profileType + " HTTP response failed: " + error.message + "\\nClient stdout/stderr:\\n" + clientLogsBuffer + "\\nClient Xray log:\\n" + profileLog + "\\nServer Xray log:\\n" + serverLog + "\\nRouter logs:\\n" + appLogsBuffer);
+      });
       assert.match(payload, /HTTP\/1\.[01] 200/, profileType + " returned non-200 response");
       assert.match(payload, /novapanel-e2e-ok/, profileType + " did not tunnel the response");
     }

@@ -7,6 +7,7 @@ import net from "node:net";
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { buildXrayExport, makeSubscriptionLinks } from "../index.js";
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -274,6 +275,98 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     const response = await waitForHttpResponse(socksSocket, "novapanel-e2e-ok", 20000);
     assert.match(response, /HTTP\/1\.[01] 200/);
     assert.match(response, /novapanel-e2e-ok/);
+
+    // Verify other direct-mode routes over the same public port as real client traffic.
+    const generatedLinks = makeSubscriptionLinks(state, "127.0.0.1", port, "direct", status.tls_fingerprint);
+    const exported = buildXrayExport(state, generatedLinks, "127.0.0.1", port, "direct", status.tls_fingerprint);
+    async function stopCurrentClient() {
+      if (socksSocket) { socksSocket.destroy(); socksSocket = null; }
+      const child = clientChild;
+      if (!child || child.exitCode !== null) { clientChild = null; return; }
+      child.kill("SIGTERM");
+      await Promise.race([
+        new Promise((resolve) => child.once("exit", resolve)),
+        delay(2000)
+      ]);
+      if (child.exitCode === null) child.kill("SIGKILL");
+      clientChild = null;
+    }
+    async function testProfile(profileType) {
+      const link = generatedLinks.find((item) => item.type === profileType);
+      assert.ok(link, "missing profile: " + profileType);
+      const outbound = exported.outbounds.find((item) => item.tag === link.name);
+      assert.ok(outbound, "missing Xray outbound for " + profileType);
+      await stopCurrentClient();
+
+      const localSocksPort = await freePort();
+      const profileConfigPath = path.join(dataDir, "client-" + profileType.replace(/[^a-z0-9]/gi, "-") + ".json");
+      const profileLogPath = path.join(dataDir, "client-" + profileType.replace(/[^a-z0-9]/gi, "-") + ".log");
+      const clientConfig = {
+        log: { loglevel: "warning", error: profileLogPath },
+        inbounds: [{
+          listen: "127.0.0.1",
+          port: localSocksPort,
+          protocol: "socks",
+          tag: "socks-in",
+          settings: { auth: "noauth", udp: false }
+        }],
+        outbounds: [outbound, { protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "blocked" }],
+        routing: { rules: [{ type: "field", inboundTag: ["socks-in"], outboundTag: outbound.tag }] }
+      };
+      fs.writeFileSync(profileConfigPath, JSON.stringify(clientConfig, null, 2));
+      const validation = spawn(binary, ["run", "-test", "-config", profileConfigPath], {
+        cwd: dataDir,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let validationLogs = "";
+      validation.stdout.on("data", (chunk) => { validationLogs += chunk.toString(); });
+      validation.stderr.on("data", (chunk) => { validationLogs += chunk.toString(); });
+      const validationCode = await new Promise((resolve) => validation.once("exit", resolve));
+      assert.equal(validationCode, 0, profileType + " client config rejected: " + validationLogs);
+
+      clientChild = spawn(binary, ["run", "-config", profileConfigPath], {
+        cwd: dataDir,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      clientChild.stdout.on("data", (chunk) => { clientLogsBuffer += chunk.toString(); });
+      clientChild.stderr.on("data", (chunk) => { clientLogsBuffer += chunk.toString(); });
+
+      let readySocket = false;
+      const readyDeadline = Date.now() + 10000;
+      while (!readySocket && Date.now() < readyDeadline && clientChild.exitCode === null) {
+        try {
+          socksSocket = net.connect(localSocksPort, "127.0.0.1");
+          await new Promise((resolve, reject) => {
+            socksSocket.once("connect", resolve);
+            socksSocket.once("error", reject);
+          });
+          readySocket = true;
+        } catch {
+          if (socksSocket) socksSocket.destroy();
+          socksSocket = null;
+          await delay(100);
+        }
+      }
+      assert.ok(readySocket, profileType + " Xray client did not start: " + clientLogsBuffer);
+      socksSocket.setTimeout(20000);
+      socksSocket.write(Buffer.from([0x05, 0x01, 0x00]));
+      const hello = await readExactly(socksSocket, 2);
+      assert.deepEqual(Array.from(hello), [0x05, 0x00], profileType + " SOCKS greeting failed");
+      socksSocket.write(Buffer.from([
+        0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1,
+        (targetPort >> 8) & 255, targetPort & 255
+      ]));
+      const reply = await readExactly(socksSocket, 10, 25000);
+      assert.equal(reply[1], 0x00, profileType + " could not reach target: " + clientLogsBuffer + "\n" + appLogsBuffer);
+      socksSocket.write("GET /" + encodeURIComponent(profileType) + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+      const payload = await waitForHttpResponse(socksSocket, "novapanel-e2e-ok", 25000);
+      assert.match(payload, /HTTP\/1\.[01] 200/, profileType + " returned non-200 response");
+      assert.match(payload, /novapanel-e2e-ok/, profileType + " did not tunnel the response");
+    }
+
+    for (const type of ["VLESS-HTTPUpgrade", "VLESS-gRPC-TLS", "VLESS-XHTTP-TLS", "VLESS-Reality"]) {
+      await testProfile(type);
+    }
     passed = true;
   } finally {
     if (socksSocket) socksSocket.destroy();

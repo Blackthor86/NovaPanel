@@ -386,7 +386,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     if (fs.existsSync(dataDir)) {
       // Preserve diagnostic logs only on a failed test; successful runs are cleaned up.
       if (passed) fs.rmSync(dataDir, { recursive: true, force: true });
-      else console.error("[NovaPanel E2E diagnostics] " + dataDir + "\n" + appLogsBuffer + "\n" + clientLogsBuffer);
+      else console.error("[NovaPanel E2E diagnostics] " + dataDir + "\n" + appLogsBuffer + "\n" + clientLogsBuffer + "\n--- xray.log ---\n" + (fs.existsSync(path.join(dataDir, "xray.log")) ? fs.readFileSync(path.join(dataDir, "xray.log"), "utf8").slice(-12000) : "(no xray.log)"));
     }
   }
 });

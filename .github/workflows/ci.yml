@@ -24,16 +24,16 @@ jobs:
         run: npm test
       - name: Package lightweight deployment ZIP
         run: |
-          rm -rf deploy-package NovaPanel-blue-knight-lite.zip
+          rm -rf deploy-package NovaPanel-standalone.zip
           mkdir -p deploy-package/docs
           cp index.js package.json package-lock.json README.md SECURITY.md LICENSE .env.example deploy-package/
           cp docs/SETUP_FA.md deploy-package/docs/SETUP_FA.md
           cd deploy-package
-          zip -qr ../NovaPanel-blue-knight-lite.zip .
+          zip -qr ../NovaPanel-standalone.zip .
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event_name == 'pull_request' && 'NovaPanel-blue-knight-lite-preview' || 'NovaPanel-node-deploy' }}
-          path: NovaPanel-blue-knight-lite.zip
+          name: ${{ github.event_name == 'pull_request' && 'NovaPanel-standalone-preview' || 'NovaPanel-node-deploy' }}
+          path: NovaPanel-standalone.zip
           if-no-files-found: error
           retention-days: 30

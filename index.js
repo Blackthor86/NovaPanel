@@ -413,7 +413,7 @@ function buildXrayConfig(state, ports, dataDir) {
     { key: "ss", tag: "shadowsocks-ws", protocol: "shadowsocks", settings: { method: state.ssMethod, password: state.ssPassword, network: "tcp" }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.ss } } },
     { key: "reality", tag: "vless-reality", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-reality" }], decryption: "none" }, stream: {
       network: "tcp", security: "reality",
-      realitySettings: { show: false, dest: state.reality.serverName + ":443", xver: 0, serverNames: [state.reality.serverName], privateKey: state.reality.privateKey, shortIds: [state.reality.shortId] }
+      realitySettings: { show: String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "").toLowerCase() === "debug", dest: state.reality.serverName + ":443", xver: 0, serverNames: [state.reality.serverName], privateKey: state.reality.privateKey, shortIds: [state.reality.shortId] }
     } }
   ];
   return {

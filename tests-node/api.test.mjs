@@ -26,7 +26,7 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
     grpcService: "novapanel-test",
     ssMethod: "aes-256-gcm",
     ssPassword: "test-ss-password",
-    reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.microsoft.com" },
+    reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.cloudflare.com" },
     paths: {
       vless: "/connect/vless-unit-test",
       vmess: "/connect/vmess-unit-test",
@@ -64,7 +64,7 @@ test("Xray configuration builds the complete one-port inbound set on unique loop
     grpcService: "novapanel-test",
     ssMethod: "aes-256-gcm",
     ssPassword: "test-ss-password",
-    reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.microsoft.com" },
+    reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.cloudflare.com" },
     paths: {
       vless: "/connect/vless-unit-test",
       vmess: "/connect/vmess-unit-test",

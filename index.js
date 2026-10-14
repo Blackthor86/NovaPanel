@@ -265,7 +265,7 @@ function requestOrigin(req, host) {
 }
 
 function listenPort(env = process.env) {
-  const candidate = Number.parseInt(env.SERVER_PORT || env.PORT || env.NOVAPANEL_PORT || "8080", 10);
+  const candidate = Number.parseInt(env.PORT || env.SERVER_PORT || env.NOVAPANEL_PORT || "8080", 10);
   if (!Number.isInteger(candidate) || candidate < 1 || candidate > 65535) {
     throw new Error("Invalid listen port. Set SERVER_PORT or PORT to a TCP port from 1 to 65535.");
   }
@@ -429,7 +429,7 @@ function buildSingBoxConfig(state, ports, mode = "direct") {
       type: "vless", tag: "vless-reality-in", listen: "127.0.0.1", listen_port: ports.reality,
       users: [{ uuid: state.uuid, flow: "xtls-rprx-vision" }],
       tls: {
-        enabled: true, server_name: state.reality.serverName, alpn: ["h2", "http/1.1"],
+        enabled: true, server_name: state.reality.serverName, alpn: ["http/1.1"],
         reality: { enabled: true, handshake: { server: state.reality.serverName, server_port: 443 },
           private_key: state.reality.privateKey, short_id: [state.reality.shortId] }
       }

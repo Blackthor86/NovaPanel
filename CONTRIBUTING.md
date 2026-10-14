@@ -1,20 +1,15 @@
 # Contributing to NovaPanel
 
-Thanks for taking an interest in NovaPanel.
+Thanks for contributing.
 
 ## Before opening a pull request
 
-- Keep changes focused and explain the user-facing reason.
-- Add or update tests for behavior changes.
-- Run `npm test` for API/runtime changes.
-- Run `npm run build` to validate the Node API and web dashboard.
-- Never commit credentials, subscription links, private keys, or real user data.
-- Avoid logging tokens or configuration secrets.
+- Keep the runtime compact and focused on the single public port.
+- Add or update tests for changes to link generation, protocol routing, subscriptions, or engine startup.
+- Run \`npm test\`.
+- Do not commit credentials, real subscription URLs, private keys, or actual user data.
+- Avoid logging secrets. Preserve persistent state and license notices.
 
 ## License
 
-By submitting a contribution, you agree that it will be distributed under the project's AGPL-3.0-or-later license.
-
-## Project identity
-
-Please keep copyright and license notices intact. Forks and modified builds should identify their changes and must not present them as the official NovaPanel project.
+Contributions are distributed under the repository's GNU AGPL-3.0-or-later license.

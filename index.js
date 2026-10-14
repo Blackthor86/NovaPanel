@@ -13,11 +13,11 @@ import express from "express";
 import * as unzipper from "unzipper";
 
 const APP_NAME = "NovaPanel";
-const VERSION = "0.8.0";
+const VERSION = "0.9.0";
 const DEFAULT_PANEL_PATH = "knight";
 const SESSION_DAYS = 30;
 const MIN_PASSWORD_LENGTH = 8;
-const USER_AGENT = "NovaPanel/0.8.0";
+const USER_AGENT = "NovaPanel/0.9.0";
 const IS_MAIN = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 function safeEqual(a, b) {
@@ -411,34 +411,58 @@ function makeSubscriptionLinks(state, host, port, mode, fingerprint, env = proce
   return links;
 }
 
-function buildXrayConfig(state, ports, dataDir) {
-  const definitions = [
-    { key: "vless", tag: "vless-ws", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-ws" }], decryption: "none" }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.vless } } },
-    { key: "vmess", tag: "vmess-ws", protocol: "vmess", settings: { clients: [{ id: state.uuid, alterId: 0, security: "auto", email: "np-vmess-ws" }] }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.vmess } } },
-    { key: "trojan", tag: "trojan-ws", protocol: "trojan", settings: { clients: [{ password: state.uuid, email: "np-trojan-ws" }] }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.trojan } } },
-    { key: "vlessHu", tag: "vless-httpupgrade", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-hu" }], decryption: "none" }, stream: { network: "httpupgrade", security: "none", httpupgradeSettings: { path: state.paths.vlessHu } } },
-    { key: "vmessHu", tag: "vmess-httpupgrade", protocol: "vmess", settings: { clients: [{ id: state.uuid, alterId: 0, security: "auto", email: "np-vmess-hu" }] }, stream: { network: "httpupgrade", security: "none", httpupgradeSettings: { path: state.paths.vmessHu } } },
-    { key: "trojanHu", tag: "trojan-httpupgrade", protocol: "trojan", settings: { clients: [{ password: state.uuid, email: "np-trojan-hu" }] }, stream: { network: "httpupgrade", security: "none", httpupgradeSettings: { path: state.paths.trojanHu } } },
-    { key: "grpc", tag: "vless-grpc", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-grpc" }], decryption: "none" }, stream: { network: "grpc", security: "none", grpcSettings: { serviceName: state.grpcService, multiMode: false } } },
-    { key: "xhttp", tag: "vless-xhttp", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-xhttp" }], decryption: "none" }, stream: { network: "xhttp", security: "none", xhttpSettings: { path: state.paths.xhttp, host: "", mode: "auto" } } },
-    { key: "ss", tag: "shadowsocks-ws", protocol: "shadowsocks", settings: { method: state.ssMethod, password: state.ssPassword, network: "tcp" }, stream: { network: "ws", security: "none", wsSettings: { path: state.paths.ss } } },
-    { key: "reality", tag: "vless-reality", protocol: "vless", settings: { clients: [{ id: state.uuid, email: "np-vless-reality" }], decryption: "none" }, stream: {
-      network: "tcp", security: "reality",
-      realitySettings: { show: String(process.env.NOVAPANEL_XRAY_REALITY_SHOW || "").trim() === "1", dest: state.reality.serverName + ":443", xver: 0, serverNames: [state.reality.serverName], privateKey: state.reality.privateKey, shortIds: [state.reality.shortId] }
-    } }
-  ];
-  return {
-    log: { loglevel: ["debug", "info", "warning", "error", "none"].includes(String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "warning").toLowerCase()) ? String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "warning").toLowerCase() : "warning", access: path.join(dataDir, "access.log"), error: path.join(dataDir, "xray-error.log") },
-    stats: {},
-    policy: { levels: { "0": { statsUserUplink: true, statsUserDownlink: true } } },
-    inbounds: definitions.map((item) => ({
-      tag: "np-" + item.tag, listen: "127.0.0.1", port: ports[item.key],
-      protocol: item.protocol, settings: item.settings, streamSettings: item.stream, sniffing: { enabled: false }
-    })),
-    outbounds: [{ protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "blocked" }]
+function buildSingBoxConfig(state, ports, mode = "direct") {
+  const inbounds = [];
+  const add = (tag, type, key, user, transport) => {
+    inbounds.push({ type, tag, listen: "127.0.0.1", listen_port: ports[key], users: [user], ...(transport ? { transport } : {}) });
   };
+  const ws = (pathValue) => ({ type: "ws", path: pathValue, max_early_data: 2560, early_data_header_name: "Sec-WebSocket-Protocol" });
+  add("vless-ws-in", "vless", "vless", { uuid: state.uuid }, ws(state.paths.vless));
+  add("vmess-ws-in", "vmess", "vmess", { uuid: state.uuid, alter_id: 0 }, ws(state.paths.vmess));
+  add("trojan-ws-in", "trojan", "trojan", { password: state.uuid }, ws(state.paths.trojan));
+  add("vless-httpupgrade-in", "vless", "vlessHu", { uuid: state.uuid }, { type: "httpupgrade", path: state.paths.vlessHu });
+  add("vmess-httpupgrade-in", "vmess", "vmessHu", { uuid: state.uuid, alter_id: 0 }, { type: "httpupgrade", path: state.paths.vmessHu });
+  add("trojan-httpupgrade-in", "trojan", "trojanHu", { password: state.uuid }, { type: "httpupgrade", path: state.paths.trojanHu });
+  if (mode === "direct") {
+    add("vless-grpc-in", "vless", "grpc", { uuid: state.uuid }, { type: "grpc", service_name: state.grpcService });
+    inbounds.push({
+      type: "vless", tag: "vless-reality-in", listen: "127.0.0.1", listen_port: ports.reality,
+      users: [{ uuid: state.uuid, flow: "xtls-rprx-vision" }],
+      tls: {
+        enabled: true, server_name: state.reality.serverName, alpn: ["h2", "http/1.1"],
+        reality: { enabled: true, handshake: { server: state.reality.serverName, server_port: 443 },
+          private_key: state.reality.privateKey, short_id: [state.reality.shortId] }
+      }
+    });
+  }
+  return { log: { level: "warn" }, inbounds, outbounds: [{ type: "direct", tag: "direct" }, { type: "block", tag: "blocked" }] };
 }
 
+function buildXrayConfig(state, ports, dataDir, mode = "direct") {
+  const inbounds = [];
+  if (mode === "direct") {
+    inbounds.push({
+      tag: "np-vless-xhttp", listen: "127.0.0.1", port: ports.xhttp, protocol: "vless",
+      settings: { clients: [{ id: state.uuid, email: "np-vless-xhttp" }], decryption: "none" },
+      streamSettings: { network: "xhttp", security: "none", xhttpSettings: { path: state.paths.xhttp, host: "", mode: "auto" } },
+      sniffing: { enabled: false }
+    });
+    inbounds.push({
+      tag: "np-shadowsocks-ws", listen: "127.0.0.1", port: ports.ss, protocol: "shadowsocks",
+      settings: { method: state.ssMethod, password: state.ssPassword, network: "tcp" },
+      streamSettings: { network: "ws", security: "none", wsSettings: { path: state.paths.ss } },
+      sniffing: { enabled: false }
+    });
+  }
+  return {
+    log: {
+      loglevel: ["debug", "info", "warning", "error", "none"].includes(String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "warning").toLowerCase()) ? String(process.env.NOVAPANEL_XRAY_LOGLEVEL || "warning").toLowerCase() : "warning",
+      access: path.join(dataDir, "access.log"), error: path.join(dataDir, "xray-error.log")
+    },
+    stats: {}, policy: { levels: { "0": { statsUserUplink: true, statsUserDownlink: true } } },
+    inbounds, outbounds: [{ protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "blocked" }]
+  };
+}
 
 function makeClientTls(link, host, state, mode, fingerprint) {
   if (link.type === "VLESS-Reality") {
@@ -459,7 +483,7 @@ function makeClientTls(link, host, state, mode, fingerprint) {
 
 function makeSingBoxOutbound(link, state, host, port, mode, fingerprint) {
   const out = { type: link.protocol, tag: link.name, server: host, server_port: Number(port) };
-  if (link.protocol === "vless") { out.uuid = state.uuid; out.packet_encoding = "xudp"; }
+  if (link.protocol === "vless") { out.uuid = state.uuid; out.packet_encoding = "xudp"; if (link.type === "VLESS-Reality") out.flow = "xtls-rprx-vision"; }
   else if (link.protocol === "vmess") { out.uuid = state.uuid; out.alter_id = 0; out.security = "auto"; }
   else if (link.protocol === "trojan") out.password = state.uuid;
   else if (link.protocol === "shadowsocks") { out.method = state.ssMethod; out.password = state.ssPassword; out.plugin = "v2ray-plugin"; out.plugin_opts = "mode=websocket;host=" + host + ";path=" + state.paths.ss + ";mux=0"; }
@@ -475,7 +499,7 @@ function makeSingBoxOutbound(link, state, host, port, mode, fingerprint) {
 function makeXrayOutbound(link, state, host, port, mode, fingerprint) {
   let protocol = link.protocol;
   const out = { tag: link.name, protocol, settings: {} };
-  if (protocol === "vless") out.settings.vnext = [{ address: host, port: Number(port), users: [{ id: state.uuid, encryption: "none" }] }];
+  if (protocol === "vless") out.settings.vnext = [{ address: host, port: Number(port), users: [{ id: state.uuid, encryption: "none", ...(link.type === "VLESS-Reality" ? { flow: "xtls-rprx-vision" } : {}) }] }];
   else if (protocol === "vmess") out.settings.vnext = [{ address: host, port: Number(port), users: [{ id: state.uuid, alterId: 0, security: "auto" }] }];
   else if (protocol === "trojan") out.settings.servers = [{ address: host, port: Number(port), password: state.uuid }];
   else if (protocol === "shadowsocks") out.settings.servers = [{ address: host, port: Number(port), method: state.ssMethod, password: state.ssPassword }];
@@ -505,7 +529,7 @@ function makeClashProxy(link, state, host, port, mode) {
   else if (link.protocol === "shadowsocks") { proxy.cipher = state.ssMethod; proxy.password = state.ssPassword; proxy.plugin = "v2ray-plugin"; proxy["plugin-opts"] = { mode: "websocket", host, path: state.paths.ss, tls: false, mux: false }; return proxy; }
 
   if (link.type === "VLESS-Reality") {
-    proxy.tls = true; proxy.servername = state.reality.serverName; proxy["client-fingerprint"] = "chrome";
+    proxy.tls = true; proxy.servername = state.reality.serverName; proxy.flow = "xtls-rprx-vision"; proxy["client-fingerprint"] = "chrome";
     proxy["reality-opts"] = { "public-key": state.reality.publicKey, "short-id": state.reality.shortId };
     proxy["skip-cert-verify"] = false;
     return proxy;
@@ -629,8 +653,8 @@ async function ensureXrayInstalled(dataDir) {
     if (version) return { binary, version };
     if (configuredBinary) throw new Error("NOVAPANEL_XRAY_BINARY exists but is not a runnable Xray executable.");
   }
-  if (!isEnabled(process.env.NOVAPANEL_AUTO_INSTALL_XRAY)) {
-    throw new Error("Automatic Xray download is disabled by NOVAPANEL_AUTO_INSTALL_XRAY=0.");
+  if (!autoInstallEnginesEnabled()) {
+    throw new Error("Automatic engine download is disabled by NOVAPANEL_AUTO_INSTALL_ENGINES=0.");
   }
 
   const asset = xrayAssetForPlatform();
@@ -668,6 +692,73 @@ async function ensureXrayInstalled(dataDir) {
   if (!installedVersion) throw new Error("The downloaded Xray executable could not run on this host.");
   console.log("[NovaPanel] Xray-core " + installedVersion + " installed.");
   return { binary: path.join(binDir, "xray"), version: installedVersion };
+}
+
+function autoInstallEnginesEnabled(env = process.env) {
+  if (env.NOVAPANEL_AUTO_INSTALL_ENGINES !== undefined) return isEnabled(env.NOVAPANEL_AUTO_INSTALL_ENGINES);
+  return isEnabled(env.NOVAPANEL_AUTO_INSTALL_XRAY);
+}
+
+function verifySingBoxBinary(binary) {
+  try {
+    const r = spawnSync(binary, ["version"], { encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "pipe"] });
+    if (r.status !== 0) return "";
+    const out = String(r.stdout || "") + "\n" + String(r.stderr || "");
+    const m = out.match(/sing-box\s+version\s+v?([0-9]+\.[0-9]+\.[0-9]+)/i) || out.match(/version\s+v?([0-9]+\.[0-9]+\.[0-9]+)/i);
+    return m ? m[1] : "";
+  } catch { return ""; }
+}
+
+async function ensureSingBoxInstalled(dataDir) {
+  const configured = String(process.env.NOVAPANEL_SINGBOX_BINARY || "").trim();
+  const binDir = path.join(dataDir, "bin");
+  const binary = configured || path.join(binDir, "sing-box");
+  if (fs.existsSync(binary)) {
+    try { fs.chmodSync(binary, 0o755); } catch {}
+    const v = verifySingBoxBinary(binary);
+    if (v) return { binary, version: v };
+    if (configured) throw new Error("NOVAPANEL_SINGBOX_BINARY is not a runnable sing-box executable.");
+  }
+  if (!autoInstallEnginesEnabled()) throw new Error("Automatic engine download is disabled.");
+  if (process.platform !== "linux") throw new Error("Automatic sing-box installation currently supports Linux hosts only.");
+  const arch = process.arch === "x64" ? "amd64" : process.arch === "arm64" ? "arm64" : "";
+  if (!arch) throw new Error("Unsupported sing-box architecture: " + process.arch);
+  const version = String(process.env.NOVAPANEL_SINGBOX_VERSION || process.env.SINGBOX_VERSION || "1.11.15").trim().replace(/^v/i, "");
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Invalid NOVAPANEL_SINGBOX_VERSION.");
+  const asset = "sing-box-" + version + "-linux-" + arch + ".tar.gz";
+  const url = process.env.NOVAPANEL_SINGBOX_URL || process.env.SB_URL || "https://github.com/SagerNet/sing-box/releases/download/v" + version + "/" + asset;
+  fs.mkdirSync(binDir, { recursive: true });
+  const archive = path.join(binDir, asset), extractedDir = path.join(binDir, "sing-box-extract-" + process.pid);
+  console.log("[NovaPanel] Downloading official sing-box " + version + " for " + arch + ".");
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(90000), headers: { "User-Agent": USER_AGENT } });
+    if (!response.ok) throw new Error("HTTP " + response.status + " downloading sing-box from " + url);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length < 1024 * 1024) throw new Error("sing-box archive was unexpectedly small.");
+    fs.writeFileSync(archive, bytes, { mode: 0o600 });
+    fs.mkdirSync(extractedDir, { recursive: true });
+    const tar = spawnSync("tar", ["-xzf", archive, "-C", extractedDir], { encoding: "utf8", timeout: 90000, stdio: ["ignore", "pipe", "pipe"] });
+    if (tar.status !== 0) throw new Error("sing-box archive extraction failed: " + String(tar.stderr || tar.stdout || "").slice(-1200));
+    const dirs = [extractedDir]; let found = "";
+    while (dirs.length && !found) {
+      const dir = dirs.pop();
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, entry.name);
+        if (entry.isDirectory()) dirs.push(p);
+        else if (entry.isFile() && entry.name === "sing-box") { found = p; break; }
+      }
+    }
+    if (!found) throw new Error("The sing-box archive did not contain the executable.");
+    const temp = binary + ".new";
+    fs.copyFileSync(found, temp); fs.chmodSync(temp, 0o755); fs.renameSync(temp, binary);
+    const installed = verifySingBoxBinary(binary);
+    if (!installed) throw new Error("The downloaded sing-box executable could not run.");
+    console.log("[NovaPanel] sing-box " + installed + " installed.");
+    return { binary, version: installed };
+  } finally {
+    try { fs.unlinkSync(archive); } catch {}
+    try { fs.rmSync(extractedDir, { recursive: true, force: true }); } catch {}
+  }
 }
 
 function htmlEscape(value) {
@@ -792,11 +883,9 @@ async function startRuntime() {
   const mode = normalizeLinkMode();
   const linkPublicPort = linkPort(process.env, mode, actualPort);
   const boot = {
-    engine_status: isEnabled(process.env.NOVAPANEL_AUTO_INSTALL_XRAY) ? "installing" : "disabled",
-    engine_error: "",
-    engine_version: "",
-    binary: "",
-    child: null
+    engine_status: autoInstallEnginesEnabled() ? "installing" : "disabled",
+    engine_error: "", engine_version: "", singbox_version: "", xray_version: "",
+    singboxBinary: "", binary: "", singboxChild: null, xrayChild: null, child: null, stopping: false
   };
   const certHost = cleanHost(process.env.NOVAPANEL_PUBLIC_HOST || process.env.DOMAIN || process.env.FORCE_HOST || process.env.RAILWAY_PUBLIC_DOMAIN) || "localhost";
   const certificate = ensureCertificate(dataDir, certHost);
@@ -808,9 +897,13 @@ async function startRuntime() {
     reservedPorts.add(port);
     inbounds[kind] = port;
   }
+  const singBoxConfigPath = path.join(dataDir, "sing-box.json");
+  const singBoxLogPath = path.join(dataDir, "sing-box.log");
+  const singBoxConfig = buildSingBoxConfig(state, inbounds, mode);
+  writeJson(singBoxConfigPath, singBoxConfig, 0o600);
   const xrayConfigPath = path.join(dataDir, "xray.json");
   const xrayLogPath = path.join(dataDir, "xray.log");
-  const xrayConfig = buildXrayConfig(state, inbounds, dataDir);
+  const xrayConfig = buildXrayConfig(state, inbounds, dataDir, mode);
   writeJson(xrayConfigPath, xrayConfig, 0o600);
   const app = express();
   app.disable("x-powered-by");
@@ -891,7 +984,10 @@ async function startRuntime() {
       engine_status: boot.engine_status,
       engine_error: boot.engine_error,
       engine_version: boot.engine_version,
+      singbox_installed: Boolean(boot.singboxBinary),
       xray_installed: Boolean(boot.binary),
+      singbox_version: boot.singbox_version,
+      xray_version: boot.xray_version,
       tls_fingerprint: certificate.fingerprint,
       subscription_token: state.subscriptionToken,
       subscription_url: getSubscriptionUrl(req),
@@ -949,7 +1045,9 @@ async function startRuntime() {
       listen_port: actualPort,
       engine_status: boot.engine_status,
       xray_installed: Boolean(boot.binary),
-      inbound_count: xrayConfig.inbounds.length,
+      inbound_count: singBoxConfig.inbounds.length + xrayConfig.inbounds.length,
+      singbox_installed: Boolean(boot.singboxBinary),
+      xray_installed: Boolean(boot.binary),
       link_mode: mode
     });
   });
@@ -1288,71 +1386,68 @@ async function startRuntime() {
   console.log("[NovaPanel] Data directory: " + dataDir);
   console.log("[NovaPanel] Single-port TCP mux ready; TLS fingerprint " + certificate.fingerprint + ".");
 
-  async function startXray() {
-    if (!isEnabled(process.env.NOVAPANEL_AUTO_INSTALL_XRAY)) {
+  async function launchCore(name, binary, args, logPath, extraEnv = {}) {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    const log = fs.createWriteStream(logPath, { flags: "a" });
+    const child = spawn(binary, args, { cwd: dataDir, env: { ...process.env, XRAY_LOCATION_ASSET: path.join(dataDir, "bin"), ...extraEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.pipe(log, { end: false }); child.stderr.pipe(log, { end: false });
+    child.once("error", (err) => {
+      if (!boot.stopping) { boot.engine_status = "error"; boot.engine_error = name + " process error: " + err.message; }
+      console.error("[NovaPanel] " + name + " process error:", err); log.end();
+    });
+    child.once("exit", (code, signal) => {
+      if (!boot.stopping) {
+        boot.engine_status = code === 0 ? "stopped" : "error";
+        if (code !== 0) { boot.engine_error = name + " exited (code=" + code + ", signal=" + signal + "). Check " + path.basename(logPath) + "."; console.error("[NovaPanel] " + boot.engine_error); }
+      }
+      log.end();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (child.exitCode !== null) throw new Error(name + " exited immediately. " + tailFile(logPath, 3000));
+    return child;
+  }
+
+  async function startEngines() {
+    if (!autoInstallEnginesEnabled()) {
       boot.engine_status = "disabled";
-      boot.engine_error = "نصب خودکار موتور خاموش است. متغیر NOVAPANEL_AUTO_INSTALL_XRAY را حذف کن یا روی 1 قرار بده.";
+      boot.engine_error = "نصب خودکار موتور‌ها خاموش است؛ NOVAPANEL_AUTO_INSTALL_ENGINES را روی 1 قرار بده.";
       return;
     }
     try {
       boot.engine_status = "installing";
-      const installed = await ensureXrayInstalled(dataDir);
-      boot.binary = installed.binary;
-      boot.engine_version = installed.version;
-      const configWrite = spawnSync(installed.binary, ["run", "-test", "-config", xrayConfigPath], {
-        encoding: "utf8",
-        timeout: 20000,
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      if (configWrite.status !== 0) {
-        const details = String(configWrite.stderr || configWrite.stdout || "Xray rejected xray.json.").slice(-3000);
-        throw new Error("Xray configuration check failed: " + details);
+      const sb = await ensureSingBoxInstalled(dataDir);
+      boot.singboxBinary = sb.binary; boot.singbox_version = sb.version;
+      const sbCheck = spawnSync(sb.binary, ["check", "-c", singBoxConfigPath], { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"] });
+      if (sbCheck.status !== 0) throw new Error("sing-box configuration check failed: " + String(sbCheck.stderr || sbCheck.stdout || "sing-box rejected its config.").slice(-3000));
+      boot.singboxChild = await launchCore("sing-box", sb.binary, ["run", "-c", singBoxConfigPath], singBoxLogPath);
+      console.log("[NovaPanel] sing-box " + sb.version + " is running the primary VLESS, VMess and Trojan transports.");
+      // Xray is not the primary engine: it is only needed for direct-mode XHTTP and Shadowsocks.
+      if (mode === "direct" && xrayConfig.inbounds.length) {
+        const xr = await ensureXrayInstalled(dataDir);
+        boot.binary = xr.binary; boot.xray_version = xr.version;
+        const xrCheck = spawnSync(xr.binary, ["run", "-test", "-config", xrayConfigPath], { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "pipe"] });
+        if (xrCheck.status !== 0) throw new Error("Xray configuration check failed: " + String(xrCheck.stderr || xrCheck.stdout || "Xray rejected its config.").slice(-3000));
+        boot.xrayChild = await launchCore("Xray-core", xr.binary, ["run", "-config", xrayConfigPath], xrayLogPath);
+        console.log("[NovaPanel] Xray-core " + xr.version + " is running XHTTP and Shadowsocks.");
       }
-      fs.mkdirSync(dataDir, { recursive: true });
-      const log = fs.createWriteStream(xrayLogPath, { flags: "a" });
-      const child = spawn(installed.binary, ["run", "-config", xrayConfigPath], {
-        cwd: dataDir,
-        env: { ...process.env, XRAY_LOCATION_ASSET: path.join(dataDir, "bin") },
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      boot.child = child;
-      child.stdout.pipe(log, { end: false });
-      child.stderr.pipe(log, { end: false });
-      child.once("error", (err) => {
-        boot.engine_status = "error";
-        boot.engine_error = err.message;
-        console.error("[NovaPanel] Xray process error:", err);
-        log.end();
-      });
-      child.once("exit", (code, signal) => {
-        if (boot.child === child) boot.child = null;
-        if (boot.engine_status !== "error") {
-          boot.engine_status = code === 0 ? "stopped" : "error";
-          if (code !== 0) boot.engine_error = "Xray exited (code=" + code + ", signal=" + signal + "). Check xray.log.";
-        }
-        log.end();
-      });
-      await new Promise((resolve) => setTimeout(resolve, 350));
-      if (child.exitCode !== null) {
-        throw new Error("Xray exited immediately. " + tailFile(xrayLogPath, 3000));
-      }
-      boot.engine_status = "running";
-      boot.engine_error = "";
-      console.log("[NovaPanel] Xray-core " + installed.version + " is running with VLESS, VMess and Trojan WebSocket inbounds.");
+      boot.child = boot.xrayChild || boot.singboxChild;
+      boot.engine_status = "running"; boot.engine_error = "";
+      boot.engine_version = "sing-box " + boot.singbox_version + (boot.xray_version ? " / Xray " + boot.xray_version : "");
+      console.log("[NovaPanel] Proxy engines ready in " + mode + " mode.");
     } catch (err) {
-      boot.engine_status = "error";
-      boot.engine_error = String(err && err.message ? err.message : err);
-      console.error("[NovaPanel] Xray startup failed; the panel remains available:", boot.engine_error);
+      boot.engine_status = "error"; boot.engine_error = String(err && err.message ? err.message : err);
+      console.error("[NovaPanel] Engine startup failed; the panel remains available:", boot.engine_error);
     }
   }
 
   async function shutdown() {
-    if (boot.child && boot.child.exitCode === null) {
-      const child = boot.child;
-      child.kill("SIGTERM");
-      await Promise.race([new Promise((resolve) => child.once("exit", resolve)), new Promise((resolve) => setTimeout(resolve, 5000))]);
-      if (child.exitCode === null) child.kill("SIGKILL");
-    }
+    boot.stopping = true;
+    const children = [boot.xrayChild, boot.singboxChild].filter((c) => c && c.exitCode === null);
+    for (const child of children) { try { child.kill("SIGTERM"); } catch {} }
+    await Promise.all(children.map(async (child) => {
+      await Promise.race([new Promise((resolve) => child.once("exit", resolve)), new Promise((resolve) => setTimeout(resolve, 4000))]);
+      if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+    }));
     await Promise.all([
       new Promise((resolve) => tcpServer.close(() => resolve())),
       new Promise((resolve) => httpsServer.close(() => resolve())),
@@ -1360,13 +1455,13 @@ async function startRuntime() {
     ]);
   }
 
-  if (isEnabled(process.env.NOVAPANEL_AUTO_INSTALL_XRAY)) void startXray();
+  if (autoInstallEnginesEnabled()) void startEngines();
   else {
     boot.engine_status = "disabled";
-    boot.engine_error = "نصب خودکار موتور خاموش است؛ برای اتصال واقعی باید Xray نصب شود.";
+    boot.engine_error = "نصب خودکار موتور‌ها خاموش است؛ برای اتصال واقعی NOVAPANEL_AUTO_INSTALL_ENGINES=1 قرار بده.";
   }
 
-  return { app, tcpServer, httpServer, httpsServer, dataDir, state, auth, boot, shutdown, actualPort, xrayConfig, certificate };
+  return { app, tcpServer, httpServer, httpsServer, dataDir, state, auth, boot, shutdown, actualPort, singBoxConfig, xrayConfig, certificate };
 }
 
 const loginFailures = new Map();
@@ -1390,6 +1485,7 @@ if (IS_MAIN) {
 export {
   APP_NAME,
   VERSION,
+  buildSingBoxConfig,
   buildXrayConfig,
   buildClashExport,
   buildSingBoxExport,

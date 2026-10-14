@@ -97,7 +97,7 @@ async function waitForEngine(base, cookie, child, getLogs) {
         lastStatus = await response.json();
         if (lastStatus.engine_status === "running") return lastStatus;
         if (lastStatus.engine_status === "error") {
-          throw new Error("Xray failed to start: " + lastStatus.engine_error + "\n" + getLogs());
+          throw new Error("Proxy engines failed to start: " + lastStatus.engine_error + "\n" + getLogs());
         }
       }
     } catch (error) {
@@ -399,8 +399,8 @@ test("real Xray client traffic for all generated profiles passes through the ass
       const outbound = JSON.parse(JSON.stringify(sourceOutbound));
       const testLabel = profileType + (routeThroughMux ? "-mux" : "-internal");
       if (profileType === "VLESS-Reality" && !routeThroughMux) {
-        const serverConfig = JSON.parse(fs.readFileSync(path.join(dataDir, "xray.json"), "utf8"));
-        const realityInbound = serverConfig.inbounds.find((inbound) => inbound.tag === "np-vless-reality");
+        const serverConfig = JSON.parse(fs.readFileSync(path.join(dataDir, "sing-box.json"), "utf8"));
+        const realityInbound = serverConfig.inbounds.find((inbound) => inbound.tag === "vless-reality-in");
         assert.ok(realityInbound, "server Xray config must contain its Reality inbound");
         outbound.settings.vnext[0].address = realityInbound.listen;
         outbound.settings.vnext[0].port = realityInbound.port;
@@ -470,7 +470,7 @@ test("real Xray client traffic for all generated profiles passes through the ass
       socksSocket.write("GET /" + encodeURIComponent(profileType) + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
       const payload = await waitForHttpResponse(socksSocket, "novapanel-e2e-ok", 25000).catch((error) => {
         const readTail = (file, limit) => fs.existsSync(file) ? fs.readFileSync(file, "utf8").slice(-limit) : "(not created)";
-        const serverLog = readTail(path.join(dataDir, "xray.log"), 8000);
+        const serverLog = readTail(path.join(dataDir, "sing-box.log"), 8000) + "\n--- Xray ---\n" + readTail(path.join(dataDir, "xray.log"), 8000);
         const serverErrors = readTail(path.join(dataDir, "xray-error.log"), 10000);
         const serverAccess = readTail(path.join(dataDir, "access.log"), 6000);
         const profileLog = readTail(profileLogPath, 8000);

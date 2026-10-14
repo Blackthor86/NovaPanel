@@ -6,7 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { buildXrayConfig, buildClashExport, buildSingBoxExport, buildXrayExport, makeSubscriptionLinks, VERSION } from "../index.js";
+import { buildSingBoxConfig, buildXrayConfig, buildClashExport, buildSingBoxExport, buildXrayExport, makeSubscriptionLinks, VERSION } from "../index.js";
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -58,32 +58,33 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
   assert.ok(trojanLink.uri.includes("@panel.example.test:443"));
 });
 
-test("Xray configuration builds the complete one-port inbound set on unique loopback ports", () => {
+test("primary protocols run on sing-box and Xray is limited to XHTTP and Shadowsocks", () => {
   const state = {
-    uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
-    grpcService: "novapanel-test",
-    ssMethod: "aes-256-gcm",
-    ssPassword: "test-ss-password",
+    uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001", grpcService: "novapanel-test",
+    ssMethod: "aes-256-gcm", ssPassword: "test-ss-password",
     reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.cloudflare.com" },
     paths: {
-      vless: "/connect/vless-unit-test",
-      vmess: "/connect/vmess-unit-test",
-      trojan: "/connect/trojan-unit-test",
-      vlessHu: "/connect/vless-hu-unit-test",
-      vmessHu: "/connect/vmess-hu-unit-test",
-      trojanHu: "/connect/trojan-hu-unit-test",
-      grpc: "/connect/grpc-unit-test",
-      xhttp: "/connect/xhttp-unit-test",
-      ss: "/connect/ss-unit-test"
+      vless: "/connect/vless-unit-test", vmess: "/connect/vmess-unit-test", trojan: "/connect/trojan-unit-test",
+      vlessHu: "/connect/vless-hu-unit-test", vmessHu: "/connect/vmess-hu-unit-test", trojanHu: "/connect/trojan-hu-unit-test",
+      grpc: "/connect/grpc-unit-test", xhttp: "/connect/xhttp-unit-test", ss: "/connect/ss-unit-test"
     }
   };
-  const config = buildXrayConfig(state, { vless: 22001, vmess: 22002, trojan: 22003, vlessHu: 22004, vmessHu: 22005, trojanHu: 22006, grpc: 22007, xhttp: 22008, ss: 22009, reality: 22010 }, "/tmp/novapanel-test");
-  assert.equal(config.inbounds.length, 10);
-  assert.deepEqual(config.inbounds.map((item) => item.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan", "vless", "vless", "shadowsocks", "vless"]);
-  assert.deepEqual(config.inbounds.map((item) => item.port), [22001, 22002, 22003, 22004, 22005, 22006, 22007, 22008, 22009, 22010]);
-  assert.ok(config.inbounds.every((item) => item.listen === "127.0.0.1"));
-  assert.deepEqual(config.inbounds.map((item) => item.streamSettings.network), ["ws", "ws", "ws", "httpupgrade", "httpupgrade", "httpupgrade", "grpc", "xhttp", "ws", "tcp"]);
-  assert.deepEqual(config.inbounds.slice(0, 3).map((item) => item.streamSettings.wsSettings.path), [state.paths.vless, state.paths.vmess, state.paths.trojan]);
+  const ports = { vless: 22001, vmess: 22002, trojan: 22003, vlessHu: 22004, vmessHu: 22005, trojanHu: 22006, grpc: 22007, xhttp: 22008, ss: 22009, reality: 22010 };
+  const sb = buildSingBoxConfig(state, ports, "direct");
+  assert.equal(sb.inbounds.length, 8);
+  assert.deepEqual(sb.inbounds.map((x) => x.type), ["vless", "vmess", "trojan", "vless", "vmess", "trojan", "vless", "vless"]);
+  assert.deepEqual(sb.inbounds.map((x) => x.listen_port), [22001, 22002, 22003, 22004, 22005, 22006, 22007, 22010]);
+  assert.ok(sb.inbounds.every((x) => x.listen === "127.0.0.1"));
+  assert.deepEqual(sb.inbounds.slice(0, 3).map((x) => x.transport.path), [state.paths.vless, state.paths.vmess, state.paths.trojan]);
+  assert.equal(sb.inbounds[6].transport.type, "grpc");
+  assert.ok(sb.inbounds[7].tls.reality.enabled);
+  const xr = buildXrayConfig(state, ports, "/tmp/novapanel-test", "direct");
+  assert.equal(xr.inbounds.length, 2);
+  assert.deepEqual(xr.inbounds.map((x) => x.protocol), ["vless", "shadowsocks"]);
+  assert.deepEqual(xr.inbounds.map((x) => x.port), [22008, 22009]);
+  assert.ok(xr.inbounds.every((x) => x.listen === "127.0.0.1"));
+  assert.equal(buildSingBoxConfig(state, ports, "edge").inbounds.length, 6);
+  assert.equal(buildXrayConfig(state, ports, "/tmp/novapanel-test", "edge").inbounds.length, 0);
 });
 
 test("standalone start binds SERVER_PORT, allows first-use password setup, and serves a usable base64 subscription", async () => {
@@ -125,6 +126,8 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
     assert.equal(health.version, VERSION);
     assert.equal(health.listen_port, port);
     assert.equal(health.engine_status, "disabled");
+    assert.equal(health.singbox_installed, false);
+    assert.equal(health.xray_installed, false);
 
     const setupPage = await fetch(base + "/knight/login");
     assert.equal(setupPage.status, 200);

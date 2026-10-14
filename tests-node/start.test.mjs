@@ -170,7 +170,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
     const cookie = setCookie.split(";")[0];
 
     const status = await waitForEngine(base, cookie, appChild, () => appLogsBuffer);
-    assert.equal(status.links.length, 6);
+    assert.equal(status.links.length, 13);
     const state = JSON.parse(fs.readFileSync(path.join(dataDir, "state.json"), "utf8"));
     const profile = status.links.find((link) => link.type === "VLESS-WS-TLS");
     assert.ok(profile, "TLS WebSocket VLESS profile must be generated");

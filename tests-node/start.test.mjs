@@ -303,16 +303,25 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
       if (child.exitCode === null) child.kill("SIGKILL");
       clientChild = null;
     }
-    async function testProfile(profileType) {
+    async function testProfile(profileType, routeThroughMux = true) {
       const link = generatedLinks.find((item) => item.type === profileType);
       assert.ok(link, "missing profile: " + profileType);
-      const outbound = exported.outbounds.find((item) => item.tag === link.name);
-      assert.ok(outbound, "missing Xray outbound for " + profileType);
+      const sourceOutbound = exported.outbounds.find((item) => item.tag === link.name);
+      assert.ok(sourceOutbound, "missing Xray outbound for " + profileType);
+      const outbound = JSON.parse(JSON.stringify(sourceOutbound));
+      const testLabel = profileType + (routeThroughMux ? "-mux" : "-internal");
+      if (profileType === "VLESS-Reality" && !routeThroughMux) {
+        const serverConfig = JSON.parse(fs.readFileSync(path.join(dataDir, "xray.json"), "utf8"));
+        const realityInbound = serverConfig.inbounds.find((inbound) => inbound.tag === "np-vless-reality");
+        assert.ok(realityInbound, "server Xray config must contain its Reality inbound");
+        outbound.settings.vnext[0].address = realityInbound.listen;
+        outbound.settings.vnext[0].port = realityInbound.port;
+      }
       await stopCurrentClient();
 
       const localSocksPort = await freePort();
-      const profileConfigPath = path.join(dataDir, "client-" + profileType.replace(/[^a-z0-9]/gi, "-") + ".json");
-      const profileLogPath = path.join(dataDir, "client-" + profileType.replace(/[^a-z0-9]/gi, "-") + ".log");
+      const profileConfigPath = path.join(dataDir, "client-" + testLabel.replace(/[^a-z0-9]/gi, "-") + ".json");
+      const profileLogPath = path.join(dataDir, "client-" + testLabel.replace(/[^a-z0-9]/gi, "-") + ".log");
       const clientConfig = {
         log: { loglevel: "debug", error: profileLogPath },
         inbounds: [{
@@ -383,9 +392,13 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
       assert.match(payload, /novapanel-e2e-ok/, profileType + " did not tunnel the response");
     }
 
-    for (const type of ["VLESS-HTTPUpgrade", "VLESS-gRPC-TLS", "VLESS-XHTTP-TLS", "VLESS-Reality"]) {
+    for (const type of ["VLESS-HTTPUpgrade", "VLESS-gRPC-TLS", "VLESS-XHTTP-TLS"]) {
       await testProfile(type);
     }
+    // Compare Reality directly against the loopback Xray inbound and through
+    // the shared public-port mux to determine which layer drops the handshake.
+    await testProfile("VLESS-Reality", false);
+    await testProfile("VLESS-Reality", true);
     passed = true;
   } finally {
     if (socksSocket) socksSocket.destroy();

@@ -40,8 +40,8 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
     }
   };
   const links = makeSubscriptionLinks(state, "panel.example.test", 443, "edge", "a".repeat(64), {});
-  assert.equal(links.length, 13);
-  assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan"]);
+  assert.equal(links.length, 7);
+  assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan", "vless"]);
   const uriLinks = links.filter((link) => link.protocol !== "vmess");
   assert.ok(uriLinks.every((link) => link.uri.includes("@panel.example.test:443")));
   assert.ok(links.every((link) => link.uri.includes("security=tls") || link.protocol === "vmess"));
@@ -156,7 +156,7 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
     assert.match(subRes.headers.get("content-type") || "", /text\/plain/);
     assert.equal(subRes.headers.get("profile-update-interval"), "24");
     const links = Buffer.from(await subRes.text(), "base64").toString("utf8").trim().split(/\r?\n/);
-    assert.equal(links.length, 6);
+    assert.equal(links.length, 13);
     assert.ok(links.some((line) => line.startsWith("vless://") && line.includes("security=none")));
     assert.ok(links.some((line) => line.startsWith("vless://") && line.includes("security=tls")));
     assert.ok(links.some((line) => line.startsWith("vmess://")));

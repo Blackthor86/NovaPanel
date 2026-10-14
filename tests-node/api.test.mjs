@@ -26,11 +26,17 @@ test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths"
     paths: {
       vless: "/connect/vless-unit-test",
       vmess: "/connect/vmess-unit-test",
-      trojan: "/connect/trojan-unit-test"
+      trojan: "/connect/trojan-unit-test",
+      vlessHu: "/connect/vless-hu-unit-test",
+      vmessHu: "/connect/vmess-hu-unit-test",
+      trojanHu: "/connect/trojan-hu-unit-test",
+      grpc: "/connect/grpc-unit-test",
+      xhttp: "/connect/xhttp-unit-test",
+      ss: "/connect/ss-unit-test"
     }
   };
   const links = makeSubscriptionLinks(state, "panel.example.test", 443, "edge", "a".repeat(64), {});
-  assert.equal(links.length, 3);
+  assert.equal(links.length, 6);
   assert.deepEqual(links.map((link) => link.protocol), ["vless", "vmess", "trojan"]);
   const uriLinks = links.filter((link) => link.protocol !== "vmess");
   assert.ok(uriLinks.every((link) => link.uri.includes("@panel.example.test:443")));
@@ -54,16 +60,22 @@ test("Xray configuration has all three WebSocket inbounds on unique loopback por
     paths: {
       vless: "/connect/vless-unit-test",
       vmess: "/connect/vmess-unit-test",
-      trojan: "/connect/trojan-unit-test"
+      trojan: "/connect/trojan-unit-test",
+      vlessHu: "/connect/vless-hu-unit-test",
+      vmessHu: "/connect/vmess-hu-unit-test",
+      trojanHu: "/connect/trojan-hu-unit-test",
+      grpc: "/connect/grpc-unit-test",
+      xhttp: "/connect/xhttp-unit-test",
+      ss: "/connect/ss-unit-test"
     }
   };
   const config = buildXrayConfig(state, { vless: 22001, vmess: 22002, trojan: 22003 }, "/tmp/novapanel-test");
-  assert.equal(config.inbounds.length, 3);
-  assert.deepEqual(config.inbounds.map((item) => item.protocol), ["vless", "vmess", "trojan"]);
-  assert.deepEqual(config.inbounds.map((item) => item.port), [22001, 22002, 22003]);
+  assert.equal(config.inbounds.length, 10);
+  assert.deepEqual(config.inbounds.map((item) => item.protocol), ["vless", "vmess", "trojan", "vless", "vmess", "trojan", "vless", "vless", "shadowsocks", "vless"]);
+  assert.deepEqual(config.inbounds.map((item) => item.port), [22001, 22002, 22003, undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
   assert.ok(config.inbounds.every((item) => item.listen === "127.0.0.1"));
   assert.ok(config.inbounds.every((item) => item.streamSettings.network === "ws"));
-  assert.deepEqual(config.inbounds.map((item) => item.streamSettings.wsSettings.path), Object.values(state.paths));
+  assert.deepEqual(config.inbounds.slice(0, 3).map((item) => item.streamSettings.wsSettings.path), [state.paths.vless, state.paths.vmess, state.paths.trojan]);
 });
 
 test("standalone start binds SERVER_PORT, allows first-use password setup, and serves a usable base64 subscription", async () => {

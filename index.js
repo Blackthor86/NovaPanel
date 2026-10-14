@@ -1077,7 +1077,14 @@ async function startRuntime() {
     minVersion: "TLSv1.2",
     allowHTTP1: true,
     ALPNProtocols: ["h2", "http/1.1"]
-  }, app);
+  });
+  // Keep Express on the HTTP/1 compatibility path only. HTTP/2 streams are
+  // proxied by the stream handler below; passing Express as the constructor
+  // callback can make Node create an IncomingMessage without an HTTP/1 socket.
+  httpsServer.on("request", (req, res) => {
+    if (req.httpVersion === "2.0") return;
+    app(req, res);
+  });
   httpsServer.keepAliveTimeout = 120000;
   httpsServer.headersTimeout = 125000;
   httpsServer.requestTimeout = 0;

@@ -474,7 +474,7 @@ function makeXrayOutbound(link, state, host, port, mode, fingerprint) {
   else if (link.transport === "grpc") stream.grpcSettings = { serviceName: state.grpcService, multiMode: false };
   else if (link.transport === "xhttp") stream.xhttpSettings = { path: state.paths.xhttp, host: host, mode: "auto" };
   if (link.type === "VLESS-Reality") {
-    stream.realitySettings = { serverName: state.reality.serverName, fingerprint: "chrome", publicKey: state.reality.publicKey, shortId: state.reality.shortId, spiderX: "/" };
+    stream.realitySettings = { serverName: state.reality.serverName, fingerprint: "chrome", password: state.reality.publicKey, shortId: state.reality.shortId, spiderX: "/" };
   } else if (link.tls) {
     stream.tlsSettings = { serverName: host, alpn: link.transport === "grpc" || link.transport === "xhttp" ? ["h2"] : ["http/1.1"], fingerprint: "chrome" };
     if (mode !== "edge") {

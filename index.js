@@ -478,8 +478,8 @@ function makeXrayOutbound(link, state, host, port, mode, fingerprint) {
   } else if (link.tls) {
     stream.tlsSettings = { serverName: host, alpn: link.transport === "grpc" ? ["h2"] : ["http/1.1"], fingerprint: "chrome" };
     if (mode !== "edge") {
-      stream.tlsSettings.allowInsecure = true;
       if (fingerprint) stream.tlsSettings.pinnedPeerCertSha256 = fingerprint;
+      else stream.tlsSettings.allowInsecure = true;
     }
   }
   out.streamSettings = stream;

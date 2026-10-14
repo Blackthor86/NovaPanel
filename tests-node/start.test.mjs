@@ -148,6 +148,7 @@ test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public T
         NOVAPANEL_PUBLIC_HOST: "127.0.0.1",
         NOVAPANEL_AUTO_INSTALL_XRAY: "1",
         NOVAPANEL_LINK_MODE: "direct",
+        NOVAPANEL_XRAY_LOGLEVEL: "debug",
         PANEL_PATH: "knight"
       },
       stdio: ["ignore", "pipe", "pipe"]

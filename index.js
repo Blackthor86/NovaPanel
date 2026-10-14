@@ -418,10 +418,10 @@ function buildSingBoxConfig(state, ports, mode = "direct") {
   };
   const ws = (pathValue) => ({ type: "ws", path: pathValue, max_early_data: 2560, early_data_header_name: "Sec-WebSocket-Protocol" });
   add("vless-ws-in", "vless", "vless", { uuid: state.uuid }, ws(state.paths.vless));
-  add("vmess-ws-in", "vmess", "vmess", { uuid: state.uuid, alter_id: 0 }, ws(state.paths.vmess));
+  add("vmess-ws-in", "vmess", "vmess", { uuid: state.uuid, alterId: 0 }, ws(state.paths.vmess));
   add("trojan-ws-in", "trojan", "trojan", { password: state.uuid }, ws(state.paths.trojan));
   add("vless-httpupgrade-in", "vless", "vlessHu", { uuid: state.uuid }, { type: "httpupgrade", path: state.paths.vlessHu });
-  add("vmess-httpupgrade-in", "vmess", "vmessHu", { uuid: state.uuid, alter_id: 0 }, { type: "httpupgrade", path: state.paths.vmessHu });
+  add("vmess-httpupgrade-in", "vmess", "vmessHu", { uuid: state.uuid, alterId: 0 }, { type: "httpupgrade", path: state.paths.vmessHu });
   add("trojan-httpupgrade-in", "trojan", "trojanHu", { password: state.uuid }, { type: "httpupgrade", path: state.paths.trojanHu });
   if (mode === "direct") {
     add("vless-grpc-in", "vless", "grpc", { uuid: state.uuid }, { type: "grpc", service_name: state.grpcService });

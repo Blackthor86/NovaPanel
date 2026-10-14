@@ -1,26 +1,27 @@
 # Security policy
 
-NovaPanel is a compact early baseline under active development. Do not expose it to the public internet or rely on it for important traffic until you have tested the installed Xray version, subscription behavior and host-specific networking.
+NovaPanel is an early-stage, single-port Node.js panel. Do not use it for important traffic until you have tested the actual proxy client and host-specific networking.
 
-## Before deploying
+## Before deployment
 
-- Use a persistent, access-controlled data directory. It contains the UUID, subscription token, password hash, HMAC session secret, TLS certificate and private key.
-- Keep the subscription URL private. Anyone holding its token can download the current Base64 subscription.
-- Choose a strong admin password and configure SETUP_KEY when the first-visit login page is reachable by untrusted users.
-- Use the public host and public port that are genuinely routed to this application. Generated links do not prove that inbound TCP/TLS or WebSocket upgrades work.
-- Automatic Xray installation downloads an official release for Linux x64/arm64 and attempts to validate the published SHA-256 digest when available. Review the upstream release and digest before production use; use NOVAPANEL_XRAY_BINARY to supply a separately verified executable.
-- The direct-mode TLS certificate is self-signed. Subscription links include a SHA-256 pin for clients that support the Xray pcs/pinnedPeerCertSha256 convention. Confirm the client recognizes it; do not broadly disable certificate verification as a workaround.
-- Do not log or share session cookies, password values, subscription URLs, UUIDs or private keys.
-- Confirm the hosting provider permits the workload and allows a child Xray process, downloadable binaries and the necessary network connections.
+- Use a persistent, private data directory. It contains the UUID, subscription token, password hash, session secret, TLS certificate and private key, transport paths, and Reality keys.
+- Keep the subscription URL private. Anyone holding the token can download the current subscription and its configuration exports.
+- Choose a strong admin password. Configure \`SETUP_KEY\` when first-time setup is reachable by untrusted visitors.
+- Confirm that the assigned public TCP port genuinely reaches this application. A generated link does not prove the port, HTTP/2, TLS, WebSocket Upgrade, or raw TCP routing is available.
+- Automatic Xray installation downloads an official Linux release and attempts to verify its published SHA-256 digest when available. Review the upstream release; alternatively supply a separately verified executable via \`NOVAPANEL_XRAY_BINARY\`.
+- Direct-mode TLS uses a self-signed certificate. Links include a certificate pin and compatibility option. Check whether the client honors these parameters; do not disable TLS verification broadly as a workaround.
+- Do not log or share session cookies, subscription URLs, UUIDs, passwords or private keys.
+- Confirm that the hosting provider allows child processes, binary downloads and the network connections needed by the engine.
 
-## Known limitations in this compact baseline
+## Known limitations
 
-- It intentionally focuses on VLESS/VMess/Trojan over WebSocket and a single shared TCP listener.
-- Traffic quotas, user CRUD, Clash/sing-box output, Reality, gRPC, XHTTP and per-user traffic accounting are not implemented in this baseline.
-- The TLS certificate is self-signed and generated for the current hostname; only the client certificate pin is intended to establish trust. Recreate or rotate the pin when the certificate changes.
-- Actual reachability still depends on the hosting provider's routing and network policy. Run the live tunnel test and confirm /api/health reports engine_status: "running" before testing an app client.
-- This code has not undergone an independent security review. Restrict administrative access and preserve a recovery copy of the persistent data directory.
+- This is an independent implementation of a compact one-port design, not an audited security product. The native Xray engine remains a separate executable managed by Node.js.
+- Transport compatibility varies by client version. Import the generated subscription into the actual target client and test traffic for each profile you intend to use.
+- The direct-mode TLS certificate is self-signed. The certificate pin must be refreshed if the certificate changes. Edge mode relies on the provider’s public HTTPS endpoint and WebSocket Upgrade support; raw-TCP transports are not available in edge mode.
+- Traffic accounting, multiple separately managed users, quotas, and usage expiry are not implemented in this compact runtime.
+- Actual reachability depends on host routing and policy. CI verifies an end-to-end VLESS TLS/WebSocket path locally, but that does not guarantee every protocol or every provider works.
+- Restrict administrative access and keep a recovery copy of the persistent data directory.
 
 ## Reporting a vulnerability
 
-Please contact the repository owner privately with a concise report and reproduction steps. Do not publish session cookies, subscription URLs, private keys, or other secrets in issues.
+Please contact the repository owner privately with concise reproduction steps. Do not publish session cookies, subscription URLs, private keys, or other secrets in issues.

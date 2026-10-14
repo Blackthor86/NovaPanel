@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import http from "node:http";
+import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { buildXrayExport, makeSubscriptionLinks } from "../index.js";
@@ -106,6 +107,91 @@ async function waitForEngine(base, cookie, child, getLogs) {
   }
   throw new Error("Xray did not become ready: " + JSON.stringify(lastStatus) + "\n" + getLogs());
 }
+
+
+test("persistent identity survives restart and migrates the legacy Microsoft Reality default", { timeout: 30000 }, async () => {
+  const root = path.resolve(".");
+  const port = await freePort();
+  const wrongPort = port === 65535 ? port - 1 : port + 1;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "novapanel-persistence-"));
+  const keyPair = crypto.generateKeyPairSync("x25519");
+  const privateKey = keyPair.privateKey.export({ type: "pkcs8", format: "der" }).subarray(-32).toString("base64url");
+  const publicKey = keyPair.publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64url");
+  const initialState = {
+    uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
+    subscriptionToken: "persistent-subscription-token-test",
+    reality: { privateKey, publicKey, shortId: "0123456789abcdef", serverName: "www.microsoft.com" }
+  };
+  fs.writeFileSync(path.join(dataDir, "state.json"), JSON.stringify(initialState, null, 2));
+  const base = "http://127.0.0.1:" + port;
+  let first;
+  let second;
+
+  function startProcess() {
+    let logs = "";
+    const child = spawn(process.execPath, ["index.js"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        SERVER_PORT: String(port),
+        PORT: String(wrongPort),
+        NOVAPANEL_DATA_DIR: dataDir,
+        NOVAPANEL_PUBLIC_HOST: "127.0.0.1",
+        NOVAPANEL_AUTO_INSTALL_XRAY: "0",
+        NOVAPANEL_LINK_MODE: "direct",
+        NOVAPANEL_REALITY_SNI: "",
+        PANEL_PATH: "knight"
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    child.stdout.on("data", (chunk) => { logs += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { logs += chunk.toString(); });
+    return { child, getLogs: () => logs };
+  }
+
+  async function stopProcess(child) {
+    if (!child || child.exitCode !== null) return;
+    child.kill("SIGTERM");
+    await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      delay(4000)
+    ]);
+    if (child.exitCode === null) {
+      child.kill("SIGKILL");
+      await Promise.race([
+        new Promise((resolve) => child.once("exit", resolve)),
+        delay(1000)
+      ]);
+    }
+  }
+
+  try {
+    first = startProcess();
+    await waitForHealth(base, first.child, first.getLogs);
+    const afterFirstStart = JSON.parse(fs.readFileSync(path.join(dataDir, "state.json"), "utf8"));
+    assert.equal(afterFirstStart.uuid, initialState.uuid, "existing UUID must be preserved");
+    assert.equal(afterFirstStart.subscriptionToken, initialState.subscriptionToken, "existing subscription token must be preserved");
+    assert.equal(afterFirstStart.reality.privateKey, privateKey);
+    assert.equal(afterFirstStart.reality.publicKey, publicKey);
+    assert.equal(afterFirstStart.reality.shortId, initialState.reality.shortId);
+    assert.equal(afterFirstStart.reality.serverName, "www.cloudflare.com", "the obsolete Microsoft default must be migrated");
+
+    await stopProcess(first.child);
+    second = startProcess();
+    await waitForHealth(base, second.child, second.getLogs);
+    const afterRestart = JSON.parse(fs.readFileSync(path.join(dataDir, "state.json"), "utf8"));
+    assert.equal(afterRestart.uuid, afterFirstStart.uuid);
+    assert.equal(afterRestart.subscriptionToken, afterFirstStart.subscriptionToken);
+    assert.equal(afterRestart.reality.privateKey, afterFirstStart.reality.privateKey);
+    assert.equal(afterRestart.reality.publicKey, afterFirstStart.reality.publicKey);
+    assert.equal(afterRestart.reality.shortId, afterFirstStart.reality.shortId);
+    assert.equal(afterRestart.reality.serverName, afterFirstStart.reality.serverName);
+  } finally {
+    await stopProcess(first && first.child);
+    await stopProcess(second && second.child);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
 
 test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public TCP port", { timeout: 240000 }, async () => {
   const root = path.resolve(".");

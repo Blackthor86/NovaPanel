@@ -2,8 +2,6 @@
 .env.*
 !.env.example
 node_modules/
-build/
-frontend/dist/
 .DS_Store
 .idea/
 .vscode/
@@ -13,7 +11,6 @@ bin/
 *.sqlite3
 *.db
 *.log
-
 bk-data/
 novapanel-data/
 *.pem

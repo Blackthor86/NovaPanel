@@ -399,11 +399,11 @@ test("real Xray client traffic for all generated profiles passes through the ass
       const outbound = JSON.parse(JSON.stringify(sourceOutbound));
       const testLabel = profileType + (routeThroughMux ? "-mux" : "-internal");
       if (profileType === "VLESS-Reality" && !routeThroughMux) {
-        const serverConfig = JSON.parse(fs.readFileSync(path.join(dataDir, "sing-box.json"), "utf8"));
-        const realityInbound = serverConfig.inbounds.find((inbound) => inbound.tag === "vless-reality-in");
-        assert.ok(realityInbound, "server Xray config must contain its Reality inbound");
+        const serverConfig = JSON.parse(fs.readFileSync(path.join(dataDir, "xray.json"), "utf8"));
+        const realityInbound = serverConfig.inbounds.find((inbound) => inbound.tag === "np-vless-reality");
+        assert.ok(realityInbound, "Xray server config must contain its Reality inbound");
         outbound.settings.vnext[0].address = realityInbound.listen;
-        outbound.settings.vnext[0].port = realityInbound.listen_port;
+        outbound.settings.vnext[0].port = realityInbound.port;
       }
       await stopCurrentClient();
 

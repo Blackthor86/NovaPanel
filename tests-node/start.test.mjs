@@ -403,7 +403,7 @@ test("real Xray client traffic for all generated profiles passes through the ass
         const realityInbound = serverConfig.inbounds.find((inbound) => inbound.tag === "vless-reality-in");
         assert.ok(realityInbound, "server Xray config must contain its Reality inbound");
         outbound.settings.vnext[0].address = realityInbound.listen;
-        outbound.settings.vnext[0].port = realityInbound.port;
+        outbound.settings.vnext[0].port = realityInbound.listen_port;
       }
       await stopCurrentClient();
 

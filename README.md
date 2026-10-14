@@ -5,7 +5,7 @@ NovaPanel is a compact, single-process Node.js connection panel designed for hos
 ## Core behavior
 
 - First visit opens the setup page; choose an admin password and no username is required.
-- One TCP listener handles the web panel plus compatible proxy transports. The public listener prefers \`SERVER_PORT\`, then \`PORT\`.
+ - One TCP listener handles the web panel plus compatible proxy transports. The public listener prefers `PORT`, then `SERVER_PORT`.
 - sing-box is the primary native engine for VLESS, VMess, and Trojan WebSocket/HTTPUpgrade, plus direct-mode gRPC and Reality. Xray-core is used only for XHTTP and Shadowsocks-over-WebSocket. Node.js handles the panel, subscription endpoints, TLS termination, and the one-port traffic router.
 - UUID, private subscription token, random transport paths, TLS certificate, and Reality keys are saved under the persistent data directory.
 - One Base64 subscription URL returns the current profile list; a V2Ray-compatible client can update that subscription without copying profiles individually.
@@ -21,7 +21,7 @@ npm install
 npm start
 \`\`\`
 
-Set the host's start command to \`npm start\`. Let the platform inject \`SERVER_PORT\` where possible. Set \`NOVAPANEL_DATA_DIR\` to a writable persistent volume, and keep that folder between restarts. If automatic engine installation is enabled, the panel starts while sing-box (and, in direct mode, Xray for XHTTP/Shadowsocks) downloads and starts. Wait until the engine status shows **running** before testing a proxy connection.
+Set the host's start command to `npm start`. Let the platform inject `PORT` (preferred) or `SERVER_PORT`. Set `NOVAPANEL_DATA_DIR` to a writable persistent volume, and keep that folder between restarts. If automatic engine installation is enabled, the panel starts while sing-box (and, in direct mode, Xray for XHTTP/Shadowsocks) downloads and starts. Wait until the engine status shows **running** before testing a proxy connection.
 
 Open \`/knight/login\` on the app's public web URL and set the initial password. After login, copy the **subscription URL**, add it in the client's Subscription section, and use Update/Refresh. Do not use an individual \`vless://\` link as the subscription URL.
 
@@ -49,7 +49,7 @@ The host must allow native sing-box and (in direct mode) Xray child processes, o
 
 | Variable | Purpose |
 |---|---|
-| \`SERVER_PORT\` / \`PORT\` | Public listener; \`SERVER_PORT\` takes precedence |
+ | `PORT` / `SERVER_PORT` | Public listener; `PORT` takes precedence |
 | \`NOVAPANEL_DATA_DIR\` | Writable persistent data directory |
 | \`NOVAPANEL_PUBLIC_HOST\` / \`DOMAIN\` | Optional public-host override |
 | \`NOVAPANEL_PUBLIC_BASE_URL\` | Optional public subscription base URL |

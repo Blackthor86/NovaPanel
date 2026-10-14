@@ -133,8 +133,8 @@ test("persistent identity survives restart and migrates the legacy Microsoft Rea
       cwd: root,
       env: {
         ...process.env,
-        SERVER_PORT: String(port),
-        PORT: String(wrongPort),
+        SERVER_PORT: String(wrongPort),
+        PORT: String(port),
         NOVAPANEL_DATA_DIR: dataDir,
         NOVAPANEL_PUBLIC_HOST: "127.0.0.1",
         NOVAPANEL_AUTO_INSTALL_XRAY: "0",
@@ -228,8 +228,8 @@ test("real Xray client traffic for all generated profiles passes through the ass
       cwd: root,
       env: {
         ...process.env,
-        SERVER_PORT: String(port),
-        PORT: String(port === 65535 ? port - 1 : port + 1),
+        SERVER_PORT: String(port === 65535 ? port - 1 : port + 1),
+        PORT: String(port),
         NOVAPANEL_DATA_DIR: dataDir,
         NOVAPANEL_PUBLIC_HOST: "127.0.0.1",
         NOVAPANEL_AUTO_INSTALL_XRAY: "1",

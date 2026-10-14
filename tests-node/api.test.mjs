@@ -6,7 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { buildXrayConfig, makeSubscriptionLinks, VERSION } from "../index.js";
+import { buildXrayConfig, buildClashExport, buildSingBoxExport, buildXrayExport, makeSubscriptionLinks, VERSION } from "../index.js";
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -23,6 +23,10 @@ async function freePort() {
 test("one UUID produces VLESS, VMess, and Trojan profiles with persistent paths", () => {
   const state = {
     uuid: "e7f9b752-352f-4c6f-8e8c-10e4d8f3f001",
+    grpcService: "novapanel-test",
+    ssMethod: "aes-256-gcm",
+    ssPassword: "test-ss-password",
+    reality: { privateKey: "test-private-key", publicKey: "test-public-key", shortId: "0123456789abcdef", serverName: "www.microsoft.com" },
     paths: {
       vless: "/connect/vless-unit-test",
       vmess: "/connect/vmess-unit-test",
@@ -153,6 +157,32 @@ test("standalone start binds SERVER_PORT, allows first-use password setup, and s
     assert.ok(links.some((line) => line.startsWith("vless://") && line.includes("security=tls")));
     assert.ok(links.some((line) => line.startsWith("vmess://")));
     assert.ok(links.some((line) => line.startsWith("trojan://")));
+    assert.ok(links.some((line) => line.includes("type=grpc")));
+    assert.ok(links.some((line) => line.includes("type=xhttp")));
+    assert.ok(links.some((line) => line.startsWith("ss://")));
+    assert.ok(links.some((line) => line.includes("security=reality")));
+    const rawOutput = await fetch(base + "/knight/raw?token=" + encodeURIComponent(status.subscription_token));
+    assert.equal(rawOutput.status, 200);
+    const rawLines = (await rawOutput.text()).trim().split(/\r?\n/);
+    assert.equal(rawLines.length, 13);
+
+    const clashResponse = await fetch(base + "/knight/clash?token=" + encodeURIComponent(status.subscription_token));
+    assert.equal(clashResponse.status, 200);
+    const clashText = await clashResponse.text();
+    assert.match(clashText, /^proxies:/m);
+    assert.match(clashText, /reality-opts:/);
+    const singBoxResponse = await fetch(base + "/knight/sb?token=" + encodeURIComponent(status.subscription_token));
+    const singBox = await singBoxResponse.json();
+    assert.ok(singBox.outbounds.length >= 13);
+    const xrayResponse = await fetch(base + "/knight/xray?token=" + encodeURIComponent(status.subscription_token));
+    const xrayClient = await xrayResponse.json();
+    assert.ok(xrayClient.outbounds.length >= 13);
+
+    const formats = {
+      vless: "vless://",
+      vmess: "vmess://",
+      trojan: "trojan://"
+    };
     for (const line of links.filter((item) => item.startsWith("vless://") || item.startsWith("trojan://"))) {
       assert.ok(line.includes("@127.0.0.1:" + port + "?"), line);
     }

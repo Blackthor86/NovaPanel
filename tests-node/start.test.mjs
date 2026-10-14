@@ -193,7 +193,7 @@ test("persistent identity survives restart and migrates the legacy Microsoft Rea
   }
 });
 
-test("real VLESS-over-TLS-WebSocket traffic passes through the assigned public TCP port", { timeout: 240000 }, async () => {
+test("real Xray client traffic for all generated profiles passes through the assigned public TCP port", { timeout: 240000 }, async () => {
   const root = path.resolve(".");
   const port = await freePort();
   const socksPort = await freePort();
